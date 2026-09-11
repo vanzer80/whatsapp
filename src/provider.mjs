@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { ReadError } from './core.mjs';
 import { dataDirectory, noLinks, powershell, secureDirectory } from './local-security.mjs';
@@ -33,6 +33,11 @@ export class WhatsAppProvider {
       if (!executablePath) throw new ReadError('CHROME_MISSING', 'Instale o Google Chrome na localização padrão.');
       verifyChrome(executablePath);
       const dataPath = secureDirectory(dataDirectory());
+      const sessionDir = path.join(dataPath, 'session-maintenance');
+      for (const f of ['lockfile', 'DevToolsActivePort']) {
+        const p = path.join(sessionDir, f);
+        try { if (existsSync(p)) unlinkSync(p); } catch {}
+      }
       const { default: wwebjs } = await import('whatsapp-web.js');
       if (this.closed) return;
       this.client = new wwebjs.Client({
@@ -49,8 +54,9 @@ export class WhatsAppProvider {
         else void this.close(); // Pairing is available only in the local interactive command.
       });
       this.client.on('authenticated', () => { if (!this.closed) this.state = 'syncing'; });
-      this.client.on('ready', () => {
+      this.client.on('ready', async () => {
         if (this.closed) { void this.client.destroy().catch(() => {}); return; }
+        await this.patchClient();
         this.state = 'ready'; this.onReady();
       });
       this.client.on('auth_failure', () => { this.state = 'authentication_failed'; });
@@ -66,8 +72,35 @@ export class WhatsAppProvider {
         : 'A conexão falhou. Feche outras instâncias do aplicativo e tente novamente.');
     }
   }
-  async chats() { return this.client.getChats(); }
-  async chat(id) { return this.client.getChatById(id); }
+  async patchClient() {
+    try {
+      await this.client?.pupPage?.evaluate(() => {
+        if (window.WWebJS && !window.WWebJS._patchedGetChatModel) {
+          const orig = window.WWebJS.getChatModel;
+          window.WWebJS.getChatModel = async (chat, options) => {
+            try {
+              return await orig(chat, options);
+            } catch {
+              if (!chat) return null;
+              const model = chat.serialize ? chat.serialize() : { id: chat.id };
+              model.isGroup = Boolean(chat.groupMetadata || (chat.id?._serialized?.endsWith('@g.us')));
+              model.formattedTitle = chat.formattedTitle || chat.name;
+              return model;
+            }
+          };
+          window.WWebJS._patchedGetChatModel = true;
+        }
+      });
+    } catch {}
+  }
+  async chats() {
+    await this.patchClient();
+    return this.client.getChats();
+  }
+  async chat(id) {
+    await this.patchClient();
+    return this.client.getChatById(id);
+  }
   async messages(chat, limit) { return chat.fetchMessages({ limit }); }
   async close() {
     this.closed = true;
