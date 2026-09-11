@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync,readFileSync,writeFileSync,readdirSync,symlinkSync} f
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 import {once} from 'node:events';
 import {Readable,duplexPair} from 'node:stream';
 import {randomBytes} from 'node:crypto';
@@ -26,8 +27,8 @@ test('registro preserva o texto e os valores de outras configurações do ChatGP
   const next=registrationText(original,executable);
   assert.ok(next.startsWith(original));
   const parsed=parse(next);
-  assert.deepEqual(parsed.mcp_servers['whatsapp-manutencao'],{command:executable,args:['--mcp'],enabled:true,startup_timeout_sec:45,tool_timeout_sec:90});
-  delete parsed.mcp_servers['whatsapp-manutencao'];
+  assert.deepEqual(parsed.mcp_servers['whatsapp_manutencao'],{command:executable,args:['--mcp'],enabled:true,startup_timeout_sec:45,tool_timeout_sec:90});
+  delete parsed.mcp_servers['whatsapp_manutencao'];
   assert.deepEqual(parsed,parse(original));
 });
 test('registro cria cópia anterior, é idempotente e atualiza somente o próprio bloco',t=>{
@@ -47,7 +48,7 @@ test('registro cria cópia anterior, é idempotente e atualiza somente o própri
 });
 test('configuração própria, TOML inválido e marcadores adulterados não são sobrescritos',t=>{
   const directory=sandbox(t),file=path.join(directory,'config.toml');
-  for(const original of ['[mcp_servers."whatsapp-manutencao"]\ncommand = "pessoal"\n','model = [',' # BEGIN WHATSAPP-MANUTENCAO LOCAL\n# END WHATSAPP-MANUTENCAO LOCAL\n',
+  for(const original of ['[mcp_servers.whatsapp_manutencao]\ncommand = "pessoal"\n','[mcp_servers."whatsapp-manutencao"]\ncommand = "pessoal"\n','model = [',' # BEGIN WHATSAPP-MANUTENCAO LOCAL\n# END WHATSAPP-MANUTENCAO LOCAL\n',
     'description = """\n# BEGIN WHATSAPP-MANUTENCAO LOCAL\ntexto do usuário\n# END WHATSAPP-MANUTENCAO LOCAL\n"""\n']){
     writeFileSync(file,original);assert.throws(()=>registerLocal(executable,file));assert.equal(readFileSync(file,'utf8'),original);
   }
@@ -159,7 +160,19 @@ test('HTTP local exige segredo e origem correta e não expõe arquivos ou açõe
   assert.equal((await fetch(d.origin+'/api/status')).status,403);
   assert.equal((await request('/api/status',{headers:{Authorization:'Bearer '+'é'.repeat(64)}})).status,403);
   assert.equal((await request('/api/status',{headers:{Origin:'https://malicioso.example'}})).status,403);
-  assert.equal((await request('/api/status',{headers:{Host:'malicioso.example'}})).status,403);
+  const maliciousHostStatus = await new Promise((resolve, reject) => {
+    const parsed = new URL(d.origin);
+    const req = http.request({
+      host: parsed.hostname,
+      port: parsed.port,
+      path: '/api/status',
+      method: 'GET',
+      headers: { Host: 'malicioso.example', Authorization: 'Bearer ' + d.ui_token }
+    }, res => resolve(res.statusCode));
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(maliciousHostStatus, 403);
   assert.equal((await request('/src/access.mjs')).status,403);
   const state=await request('/api/status');assert.equal(state.status,200);
   assert.match(state.headers.get('content-security-policy'),/frame-ancestors 'none'/);

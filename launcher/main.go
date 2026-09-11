@@ -3,6 +3,7 @@ package main
 import (
  "archive/zip"
  "crypto/sha256"
+ "encoding/binary"
  "encoding/hex"
  "encoding/json"
  "errors"
@@ -39,11 +40,30 @@ func noLinks(target string) error {
 }
 func hashReader(reader io.Reader) (string,error) {h:=sha256.New();_,err:=io.Copy(h,reader);return hex.EncodeToString(h.Sum(nil)),err}
 func openPayload(self *os.File) (*zip.Reader,error) {
- size,err:=strconv.ParseInt(payloadLength,10,64);if err!=nil||size<=0||size>300*1024*1024{return nil,errors.New("Metadados do instalador inválidos.")}
- info,err:=self.Stat();if err!=nil{return nil,err};if info.Size()<size{return nil,errors.New("Instalador incompleto.")}
- section:=io.NewSectionReader(self,info.Size()-size,size)
- sum,err:=hashReader(section);if err!=nil||sum!=payloadSHA{return nil,errors.New("O arquivo está incompleto ou foi alterado. Baixe novamente a versão fornecida.")}
- return zip.NewReader(io.NewSectionReader(self,info.Size()-size,size),size)
+ info,err:=self.Stat()
+ if err!=nil {return nil,err}
+ var size int64
+ var expectedSHA string
+ var offset int64
+ if payloadLength!="" && payloadSHA!="" {
+  s,err:=strconv.ParseInt(payloadLength,10,64)
+  if err!=nil||s<=0||s>300*1024*1024{return nil,errors.New("Metadados do instalador inválidos.")}
+  size=s
+  expectedSHA=payloadSHA
+  offset=info.Size()-size
+ } else if info.Size()>=80 {
+  trailer:=make([]byte,80)
+  if _,err:=self.ReadAt(trailer,info.Size()-80);err==nil&&string(trailer[72:80])=="WAPAYLOD" {
+   expectedSHA=string(trailer[0:64])
+   size=int64(binary.LittleEndian.Uint64(trailer[64:72]))
+   offset=info.Size()-80-size
+  }
+ }
+ if size<=0||size>300*1024*1024||offset<0||info.Size()<size {return nil,errors.New("Metadados do instalador inválidos ou instalador incompleto.")}
+ section:=io.NewSectionReader(self,offset,size)
+ sum,err:=hashReader(section)
+ if err!=nil||sum!=expectedSHA {return nil,errors.New("O arquivo está incompleto ou foi alterado. Baixe novamente a versão fornecida.")}
+ return zip.NewReader(io.NewSectionReader(self,offset,size),size)
 }
 func validateMembers(archive *zip.Reader) error {
  if len(archive.File)==0||len(archive.File)>30000{return errors.New("Quantidade de arquivos inválida.")}

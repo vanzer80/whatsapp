@@ -44,16 +44,20 @@ export function secureDirectory(directory = dataDirectory()) {
       $item=Get-Item -LiteralPath $env:WA_SECURE_DIRECTORY -Force;
       if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point'; }
       $me=[Security.Principal.WindowsIdentity]::GetCurrent().User;
-      $old=Get-Acl -LiteralPath $item.FullName;
+      $old=$item.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner);
       if ($old.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $me.Value) { throw 'Owner mismatch'; }
-      $acl=New-Object Security.AccessControl.DirectorySecurity;
-      $acl.SetOwner($me); $acl.SetAccessRuleProtection($true,$false);
+      $dir=[System.IO.DirectoryInfo]::new($item.FullName);
+      $acl=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
+      $acl.SetAccessRuleProtection($true,$false);
+      foreach ($rule in @($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))) {
+        $acl.PurgeAccessRules($rule.IdentityReference);
+      }
       foreach ($sid in @($me,([Security.Principal.SecurityIdentifier]'S-1-5-18'))) {
         $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);
         $acl.AddAccessRule($rule);
       }
-      Set-Acl -LiteralPath $item.FullName -AclObject $acl;
-      $check=Get-Acl -LiteralPath $item.FullName;
+      $dir.SetAccessControl($acl);
+      $check=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
       if (!$check.AreAccessRulesProtected) { throw 'ACL not protected'; }
       foreach ($rule in $check.Access) {
         $sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;
