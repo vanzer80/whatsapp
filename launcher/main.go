@@ -27,6 +27,7 @@ func minimalEnv() []string {
  allowed := map[string]bool{"SYSTEMROOT":true,"WINDIR":true,"COMSPEC":true,"USERPROFILE":true,"HOMEDRIVE":true,"HOMEPATH":true,"LOCALAPPDATA":true,"APPDATA":true,"PROGRAMFILES":true,"PROGRAMFILES(X86)":true,"PROGRAMW6432":true,"TEMP":true,"TMP":true,"HOME":true,"LANG":true,"LC_ALL":true}
  var result []string
  for _, item := range os.Environ() { key,_,_:=strings.Cut(item,"="); if allowed[strings.ToUpper(key)] {result=append(result,item)} }
+ if sysRoot:=os.Getenv("SYSTEMROOT"); sysRoot!="" { result=append(result,"PATH="+filepath.Join(sysRoot,"System32")+";"+sysRoot) }
  return result
 }
 func noLinks(target string) error {

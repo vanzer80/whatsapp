@@ -26,8 +26,13 @@ export async function running() {
 }
 export async function ensureRunning() {
   secureDirectory();const existing=await running();if(existing)return existing;
+  const env=minimalEnvironment();
+  if (process.platform === 'win32') {
+    const sysRoot=env.SystemRoot||env.WINDIR||'C:\\Windows';
+    env.PATH=`${sysRoot}\\System32;${sysRoot}`;
+  }
   const child=spawn(process.execPath,[path.join(releaseRoot,'scripts/desktop-service.mjs')],{
-    cwd:releaseRoot,env:minimalEnvironment(),windowsHide:true,detached:true,stdio:'ignore'
+    cwd:releaseRoot,env,windowsHide:true,detached:true,stdio:'ignore'
   });
   let spawnError=false;child.once('error',()=>{spawnError=true;});child.unref();
   const until=Date.now()+35000;
