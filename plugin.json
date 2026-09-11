@@ -1,0 +1,29 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "whatsapp-manutencao",
+  "version": "0.3.0",
+  "description": "Consulta somente de conversas do WhatsApp autorizadas localmente, para supervisão de manutenção.",
+  "author": {
+    "name": "Luís"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "WhatsApp Manutenção",
+        "shortDescription": "Leia somente conversas autorizadas no computador.",
+        "longDescription": "Aplicativo local para ChatGPT no Windows, com QR code e seleção de conversas em uma tela no computador. Oferece somente leitura por MCP local. A integração WhatsApp é não oficial. Versão em desenvolvimento; executável ainda não disponível.",
+        "developerName": "Luís",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Localize os grupos das lojas entre as conversas autorizadas.",
+          "Leia as mensagens recentes da conversa que eu indicar.",
+          "Pesquise chamados de manutenção nas conversas selecionadas."
+        ],
+        "brandColor": "#1D8264"
+      }
+    }
+  }
+}

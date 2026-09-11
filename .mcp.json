@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "whatsapp-manutencao": {
+      "type": "stdio",
+      "command": "${CODEX_PLUGIN_ROOT}/../WhatsApp-Manutencao.exe",
+      "args": [
+        "--mcp"
+      ]
+    }
+  }
+}

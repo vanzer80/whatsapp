@@ -1,0 +1,46 @@
+# Dependencies, local components and generated builds
+node_modules/
+vendor/
+toolchain/
+dist/
+build/
+out/
+coverage/
+__pycache__/
+*.py[cod]
+*.exe
+*.dll
+*.msi
+*.zip
+*.tar.*
+*.log
+*.tmp
+BUILD.json
+componentes.json
+node-tests.xml
+
+# Local credentials and browser/session data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+access.json
+desktop-service.json
+desktop-service.lock
+*.sock
+.wwebjs_auth/
+.wwebjs_cache/
+.auth/
+session/
+sessions/
+session-*/
+WhatsAppManutencaoSegura/
+
+# Machine-specific editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
