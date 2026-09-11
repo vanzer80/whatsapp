@@ -1,6 +1,6 @@
 # P0 — Compilar e verificar um único instalador Windows
 
-**Estado:** a fazer. Rascunho de issue; ainda sem responsável ou issue remota.
+**Estado:** a fazer. [Issue #2](https://github.com/vanzer80/whatsapp/issues/2); sem responsável definido.
 
 ## Problema
 

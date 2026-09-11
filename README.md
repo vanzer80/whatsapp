@@ -21,6 +21,8 @@ A interface permite alterar a seleção e bloquear o acesso. O assistente oferec
 
 ## Onde ajudar primeiro
 
+Veja as [tarefas abertas no GitHub](https://github.com/vanzer80/whatsapp/issues). Escolha uma tarefa e registre nela o trabalho que pretende realizar antes de abrir um pull request.
+
 | Prioridade | Trabalho | Resultado esperado |
 | --- | --- | --- |
 | P0 | [Confirmar a integração real no ChatGPT Windows](docs/tarefas/01-integracao-windows.md) | O aplicativo reconhece o MCP local e realiza uma consulta autorizada. |

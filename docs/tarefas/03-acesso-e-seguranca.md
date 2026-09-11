@@ -1,6 +1,6 @@
 # P0 — Validar autorização, bloqueio e canal local de ponta a ponta
 
-**Estado:** a fazer. Rascunho de issue; ainda sem responsável ou issue remota.
+**Estado:** a fazer. [Issue #3](https://github.com/vanzer80/whatsapp/issues/3); sem responsável definido.
 
 ## Problema
 

@@ -1,6 +1,6 @@
 # P1 — Validar as telas e preparar a entrega para usuário comum
 
-**Estado:** a fazer. Rascunho de issue; ainda sem responsável ou issue remota.
+**Estado:** a fazer. [Issue #4](https://github.com/vanzer80/whatsapp/issues/4); sem responsável definido.
 
 ## Problema
 

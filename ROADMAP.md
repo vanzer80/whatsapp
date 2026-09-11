@@ -22,6 +22,13 @@ Responsabilidade: desenvolvimento da interface e teste com usuário. Conferir te
 
 Repositório público criado pelo mantenedor: https://github.com/vanzer80/whatsapp
 
-As quatro frentes em `docs/tarefas` serão registradas como issues neste repositório durante o envio inicial. Cada tarefa informa o problema, os critérios de aceitação e os arquivos de referência. O mantenedor poderá revisar as contribuições por pull request.
+As quatro frentes de trabalho estão abertas como issues, com problema, critérios de aceitação e arquivos de referência:
+
+- [#1 — P0 — Confirmar integração real no ChatGPT para Windows](https://github.com/vanzer80/whatsapp/issues/1)
+- [#2 — P0 — Compilar e verificar um único instalador Windows](https://github.com/vanzer80/whatsapp/issues/2)
+- [#3 — P0 — Validar autorização, bloqueio e canal local de ponta a ponta](https://github.com/vanzer80/whatsapp/issues/3)
+- [#4 — P1 — Validar as telas e preparar a entrega para usuário comum](https://github.com/vanzer80/whatsapp/issues/4)
+
+O mantenedor pode revisar as contribuições por pull request. Os arquivos em `docs/tarefas` preservam o escopo inicial; o andamento de cada trabalho deve ser registrado na respectiva issue.
 
 Nenhuma pessoa foi convidada, marcada ou contatada. Nenhum workflow de compilação remota foi disparado. A licença de distribuição ainda será definida pelo mantenedor.
