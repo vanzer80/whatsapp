@@ -114,12 +114,12 @@ Todas as correções obrigatórias (itens A a J da auditoria de 12/09/2026) fora
 Os artefatos foram compilados e empacotados em ambiente Windows x64 limpo:
 
 1. **`dist/whatsapp-manutencao.exe`**
-   - **Tamanho:** 52.549.531 bytes (~50.1 MB)
-   - **SHA-256:** `8CE355BB665A37176C24064A46E0747294EF9461B5E26F7818055057E8DAF7B9`
+   - **Tamanho:** 52.549.788 bytes (~50.1 MB)
+   - **SHA-256:** `17FD2D3E3C218E2F4A563CB28B33201D4992B8E1DFB60B7ED84135AE21EAF7CB`
    - **Estrutura:** Launcher PE x64 compilado em Go + Payload compactado (Node.js runtime Windows x64 + dependências de produção + scripts + assets UI) + Trailer de 80 bytes com SHA-256 e assinatura mágica `WAPAYLOD`.
 
 2. **`dist/whatsapp-manutencao-windows-x64.zip`**
-   - **Tamanho:** 48.750.413 bytes (~46.4 MB)
-   - **SHA-256:** `29F34460777EC4CD2F387D380E8D71FE91FBE7181F5419A62967F5B612C288CA`
+   - **Tamanho:** 48.750.657 bytes (~46.4 MB)
+   - **SHA-256:** `00B0BC44EB1A56CE925696E33B76BF4C4CA8997576E4B1F83EC90BC65FA4D2FA`
    - **Conteúdo:** `whatsapp-manutencao.exe`, `LEIA-ME.md`, `README.md`, `RELATORIO-VALIDACAO.md`, `SECURITY.md`.
 
