@@ -65,4 +65,9 @@ $('copy-prompt').addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(prompt);notice('Pedido copiado. Cole em uma conversa nova no ChatGPT para Windows.');}
   catch{notice('No ChatGPT, peça: '+prompt);}
 });
+$('copy-gpt-token')?.addEventListener('click',async()=>{
+  if(!current?.gpt_token)return;
+  try{await navigator.clipboard.writeText(current.gpt_token);notice('Chave do GPT copiada com sucesso!');}
+  catch{notice('Chave da API: '+current.gpt_token);}
+});
 void refresh();setInterval(()=>{if(!busy)void refresh();},1500);

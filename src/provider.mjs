@@ -36,7 +36,7 @@ export class WhatsAppProvider {
       const sessionDir = path.join(dataPath, 'session-maintenance');
       if (process.platform === 'win32') {
         try {
-          powershell(`$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | Where-Object { \\$_.CommandLine -like "*WhatsAppManutencaoSegura*" } | ForEach-Object { Stop-Process -Id \\$_.ProcessId -Force }`);
+          powershell(`$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | Where-Object { $_.CommandLine -like "*WhatsAppManutencaoSegura*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
         } catch {}
       }
       for (const f of ['lockfile', 'DevToolsActivePort']) {
@@ -45,9 +45,14 @@ export class WhatsAppProvider {
       }
       const { default: wwebjs } = await import('whatsapp-web.js');
       if (this.closed) return;
+      const authStrategy = new wwebjs.LocalAuth({ clientId: 'maintenance', dataPath });
+      const origLogout = authStrategy.logout.bind(authStrategy);
+      authStrategy.logout = async () => {
+        try { await origLogout(); } catch {}
+      };
       this.client = new wwebjs.Client({
         deviceName: 'WhatsApp Manutencao 0.3.0',
-        authStrategy: new wwebjs.LocalAuth({ clientId: 'maintenance', dataPath }),
+        authStrategy,
         puppeteer: { headless: this.headless, executablePath },
         webVersionCache: { type: 'none' },
         qrMaxRetries: 5, takeoverOnConflict: false
