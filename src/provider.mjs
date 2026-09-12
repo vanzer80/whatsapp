@@ -41,11 +41,6 @@ export class WhatsAppProvider {
       verifyChrome(executablePath);
       const dataPath = secureDirectory(dataDirectory());
       const sessionDir = path.join(dataPath, 'session-maintenance');
-      if (process.platform === 'win32') {
-        try {
-          powershell(`$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | Where-Object { $_.CommandLine -like "*WhatsAppManutencaoSegura*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
-        } catch {}
-      }
       for (const f of ['lockfile', 'DevToolsActivePort']) {
         const p = path.join(sessionDir, f);
         try { if (existsSync(p)) unlinkSync(p); } catch {}
@@ -128,6 +123,12 @@ export class WhatsAppProvider {
     return this.client.getChatById(id);
   }
   async messages(chat, limit) { return chat.fetchMessages({ limit }); }
+  async logout() {
+    if (this.client && this.state === 'ready') {
+      try { await this.client.logout(); } catch {}
+    }
+    await this.close();
+  }
   async close() {
     this.closed = true;
     const proc = this.client?.pupBrowser?.process();

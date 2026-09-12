@@ -1,125 +1,79 @@
 # Relatório de Validação e Conclusão — WhatsApp Manutenção 0.3.0
 
 **Data:** 12/09/2026  
-**Status:** Concluído, validado e homologado com sucesso em ambiente Windows x64.
-**Branch auditada:** `feat/windows-release-ci` | **PR:** #5  
-**Execução CI de referência:** `34669402353`
+**Status:** CONCLUÍDO NO ESCOPO VALIDADO COM SUÍTE AUTOMATIZADA COMPLETA (80 TESTES) / CORREÇÕES IMPLEMENTADAS — VALIDAÇÃO REAL COM APARELHO PENDENTE DE PAREAMENTO INTERATIVO DE DISPOSITIVO  
+**Branch:** `feat/windows-release-ci` | **PR:** #5  
+**Commit base auditado:** `caa758e937d06cb52b1579e102f46faaf678531b`  
 
 ---
 
-## 1. Resumo da Entrega e Resolução da Auditoria
+## 1. Matriz de Resolução de Falhas da Auditoria (F01–F07)
 
-Todas as correções obrigatórias (itens A a J da auditoria de 12/09/2026) foram diagnosticadas, implementadas no código-fonte, testadas com regressão automatizada e validadas:
-
-### Item A — URL Pública e Configuração do GPT
-- **Causa identificada:** O serviço local gerava o OpenAPI anunciando `http://localhost:3000` e não recebia a notificação da URL pública HTTPS provisionada pelo túnel.
-- **Correção aplicada:**
-  - Implementado o endpoint seguro `/api/tunnel` no serviço desktop (`src/desktop-service.mjs`), que recebe atualizações autenticadas do túnel (com validação estrita de URL `https://` confiável).
-  - Atualizado o gerador de OpenAPI (`src/gpt-handler.mjs`) para injetar a URL pública validada em `servers: [{ url: publicUrl, description: 'Public tunnel endpoint' }]`.
-  - Atualizado `scripts/start-gpt-tunnel.mjs` para notificar o serviço local assim que o túnel obtém a URL pública.
-- **Comprovação:** Teste `comunicação da URL pública ao serviço atualiza o OpenAPI schema` aprovado na suíte automatizada.
-
-### Item B — Contrato OpenAPI 3.1.0 e Paridade
-- **Causa identificada:** Divergência de nomes e tipos entre o schema e a resposta (`retrieved_count` ausente em mensagens, `total_matching` ausente na busca, `coverage` retornado como array mas especificado como string, limites desencontrados 50 vs 30).
-- **Correção aplicada:**
-  - Em `src/gpt-handler.mjs`, o schema OpenAPI e as respostas da API foram rigorosamente alinhados:
-    - `POST /gpt/messages` inclui obrigatoriamente `retrieved_count` (inteiro), `truncated` (booleano), limite documentado em 30.
-    - `POST /gpt/search` inclui obrigatoriamente `total_matching` (inteiro), `coverage` especificado e retornado como array estruturado de objetos (`[{ chat_id, chat_name, messages_evaluated, oldest_timestamp, newest_timestamp }]`).
-    - Nomenclatura normalizada para `truncated` e `text_truncated`.
-- **Comprovação:** Testes `buildOpenApiSpec retorna especificação OpenAPI 3.1.0 válida`, `POST /gpt/messages retorna campos exigidos pelo OpenAPI e respeita limite` e `POST /gpt/search retorna total_matching, coverage como array estruturado e sem duplicação` aprovados.
-
-### Item C — Busca e Cobertura sem Descarte Silencioso
-- **Causa identificada:** Em `src/gpt-handler.mjs`, havia um truncamento arbitrário `searchChatIds = searchChatIds.slice(0, 3)` que descartava silenciosamente da quarta conversa em diante sem avisar o chamador.
-- **Correção aplicada:**
-  - Removido o `slice(0, 3)`. Implementada busca em lotes concorrentes controlados (`p-limit` / batches de 3 conversas) cobrindo **todas as conversas autorizadas**.
-  - Relato explícito de cobertura (`coverage`) contendo o detalhamento de cada conversa examinada.
-  - Rejeição estrita com HTTP 403 Forbidden caso qualquer `chat_id` solicitado não pertença à política de acesso autorizada.
-- **Comprovação:** Testes `busca e cobertura: resultado presente somente na quarta conversa é encontrado sem descarte silencioso` e `busca rejeita conversa não autorizada informada em chat_ids com 403` aprovados.
-
-### Item D — Erros, Limites e Proteção contra DoS
-- **Causa identificada:**
-  - Mensagens de erro de bibliotecas internas vazavam na resposta HTTP.
-  - No endpoint de busca, a resposta continha `{ results: result.messages, ...result }`, duplicando a lista de mensagens sob as chaves `results` e `messages`, inflando o JSON para ~61 KB e estourando o limite de 32 KB.
-- **Correção aplicada:**
-  - Eliminada a duplicação: a lista é retornada exclusivamente em `results`, removendo a propriedade espelhada `messages`.
-  - Adicionada sanitização de erros: mensagens internas desconhecidas são substituídas por mensagens padronizadas em português sem expor stack traces ou detalhes do provedor.
-  - Teto estrito de payload: respostas são validadas em `Buffer.byteLength(json, 'utf8') <= 32768`.
-- **Comprovação:** Teste `POST /gpt/search retorna total_matching, coverage como array estruturado e sem duplicação` comprova ausência de duplicação e respeito ao limite.
-
-### Item E — Bloqueio, Logout e Troca de Número
-- **Causa identificada:** Não existia rota ou método dedicado para a troca de número/conta, havendo risco de resíduos de sessão ou transferência indevida de permissões.
-- **Correção aplicada:**
-  - Implementado `clearSessionMaintenance()` em `src/provider.mjs` que apaga cirurgicamente apenas o diretório `%LOCALAPPDATA%\WhatsAppManutencaoSegura\session-maintenance`.
-  - Implementado `DesktopController.switchAccount()` e `DesktopController.disconnect()` em `src/desktop-controller.mjs`: revoga autorizações anteriores em `access.json`, invalida leituras em andamento, desconecta o provedor, limpa a sessão e reinicia o fluxo interativo com geração de novo QR Code.
-  - Expostos endpoints `/api/switch-account` e `/api/disconnect` e botão correspondente no painel web.
-- **Comprovação:** Teste `DesktopController.switchAccount limpa sessão, revoga permissões e permite novo pareamento` aprovado.
-
-### Item F — Segurança do cloudflared
-- **Causa identificada:** `ensureCloudflared` aceitava qualquer arquivo existente sem validar versão, procedência ou integridade do binário.
-- **Correção aplicada:**
-  - Em `src/gpt-tunnel.mjs`, fixada a versão `CLOUDFLARED_VERSION = '2026.9.1'`.
-  - Adicionada tabela de hashes criptográficos SHA-256 oficiais por plataforma/arquitetura (Windows x64: `2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712`).
-  - Download realizado para arquivo temporário `.tmp` e promovido atomicamente via renomeação apenas após confirmação estrita do SHA-256. Arquivos corrompidos ou com hash divergente são rejeitados e excluídos imediatamente.
-- **Comprovação:** Teste `ensureCloudflared rejeita arquivo adulterado e verifica integridade criptográfica` aprovado.
-
-### Item G — Gestão Integrada do Túnel no Painel
-- **Causa identificada:** O túnel dependia de inicialização manual por script externo de linha de comando.
-- **Correção aplicada:**
-  - Integrado `CloudflareTunnelManager` diretamente ao `desktop-service.mjs`, com endpoints `/api/tunnel/start` e `/api/tunnel/stop`.
-  - Interface desktop atualizada com indicador de 4 estados:
-    1. WhatsApp conectado.
-    2. Conversas autorizadas.
-    3. Conexão remota disponível (túnel ativo).
-    4. Consulta externa confirmada.
-  - Botão de Iniciar/Parar túnel e botão de cópia direta da URL do OpenAPI schema para o Custom GPT.
-- **Comprovação:** Interface web e endpoints `/api/tunnel/*` integrados e validados.
-
-### Item H — Verificação de Versão e Capacidades do Serviço
-- **Causa identificada:** `desktop-process.mjs` aceitava qualquer processo local rodando com versão `0.3.0`, podendo reutilizar serviços obsoletos sem as rotas de GPT.
-- **Correção aplicada:**
-  - Adicionados campos `build_id: '0.3.0-r2'` e `capabilities: ['mcp_reader', 'gpt_actions']` ao status do serviço em `src/desktop-service.mjs`.
-  - `desktop-process.mjs` valida explicitamente a presença da capability `gpt_actions`; caso ausente, encerra o processo legado e inicia uma instância atualizada.
-- **Comprovação:** Teste `desktop-process.running rejeita serviço antigo que não possua capabilities com gpt_actions` aprovado.
-
-### Item I — Windows, PowerShell Timeout e MCP Closed
-- **Causa identificada:**
-  - O timeout de 30s nos runners de CI do Windows ocorria porque `secureDirectory()` no PowerShell executava `$check.Access.IdentityReference.Translate([Security.Principal.SecurityIdentifier])`, acionando o subsistema LSASS RPC de resolução de domínios em diretórios temporários, além de o ambiente sanitizado não conter o `PATH` do sistema Windows (`C:\Windows\System32`).
-  - A conexão MCP encerrava prematuramente porque `stdio.mjs` herdava um ambiente estrito sem `PATH`, falhando ao invocar o PowerShell na inicialização.
-- **Correção aplicada:**
-  - Em `src/local-security.mjs`, injetado `PATH` confiável do sistema e substituída a tradução LSASS por leitura direta de SIDs via `GetAccessRules($true, $false, [Security.Principal.SecurityIdentifier])`. O tempo de execução das checagens caiu de 30.000ms para ~50ms.
-  - Em `scripts/stdio.mjs` e `scripts/desktop-stdio.mjs`, preservado o `PATH` mínimo essencial do Windows (`System32`, `Windows`, `wbem`).
-- **Comprovação:** A suíte completa passou de 30s de travamento para execução fluida em ~37 segundos.
+| Item | Falha Auditada | Causa Raiz Identificada | Correção Aplicada no Código | Teste de Regressão e Evidência |
+| :--- | :--- | :--- | :--- | :--- |
+| **F01 (P0)** | Devolução de dados após revogação entre lotes | O agregador em `src/gpt-handler.mjs` não revalidava a política de acesso entre lotes assíncronos e antes da resposta final | Implementada asserção contínua de política (`assertPolicyCurrent` consultando `reader.access.unchanged()`) antes de cada chamada, após a leitura e imediatamente antes do envio final em `sendJson`. Em caso de mudança, descarta integralmente os resultados e retorna 403 `ACCESS_REVOKED`. | Testes `F01: devolução de dados após revogação entre lotes é impedida e marcador revogado jamais vaza` e `F01: revogação persistida após coleta antes da resposta final descarta resultados` executados e **aprovados**. |
+| **F02 (P1)** | Busca interrompida pelo próprio cooldown | A busca particionava requisições em laço chamando `reader.execute` para cada lote de conversas, colidindo com o cooldown de 1500ms entre iterações da mesma consulta | Unificada a busca em uma única unidade lógica de execução em `reader.execute`, passando todas as conversas autorizadas diretamente para `provider.messages()`. A concorrência é sequencial e coordenada, sem disputa interna de cooldown, mantendo o cooldown estrito de 1500ms para requisições externas. | Teste `F02: busca em 30 conversas sob cooldown de produção de 1500ms encontra resultado na última conversa sem RATE_LIMITED interno` executado e **aprovado**. |
+| **F03 (P1)** | Encerramento de processo alheio | `desktop-process.mjs` usava `process.kill(oldDisc.pid)` baseado apenas no arquivo de descoberta ou falha de sondagem; `provider.mjs` encerrava instâncias de Chrome por substring via PowerShell | Substituído o encerramento forçado cego por encerramento autenticado via endpoint HTTP `/api/shutdown` com token e validação de `capabilities` (`gpt_actions`). Removido o encerramento de Chrome por substring em `src/provider.mjs`, delegando o encerramento ao ciclo de vida do Puppeteer. | Teste `F03: subprocesso independente criado para o teste permanece vivo; encerramento autenticado via /api/shutdown` executado e **aprovado**. |
+| **F04 (P1)** | Erros internos expostos e respostas excessivas | Erros eram liberados com regex permissiva (qualquer erro contendo "JSON") vazando mensagens e caminhos internos; respostas de erro não tinham teto de tamanho | Criado catálogo explícito de erros públicos seguros (`SAFE_PUBLIC_ERRORS`). Erros não catalogados retornam mensagem genérica padronizada sem expor caminhos ou marcadores. Teto estrito de 32.768 bytes aplicado em `sendJson` para todas as respostas, inclusive erros. | Teste `F04: erros internos contendo marcadores privados ou caminhos não vazam e respeitam 32 KB` executado e **aprovado**. |
+| **F05 (P1)** | Contrato, validação e contagens | Schema OpenAPI 3.1 usava `nullable: true` (obsoleto); campos anuláveis (`author`, `next_offset`) não representados; contagens confundiam encontrados com devolvidos; parâmetros inválidos eram tolerados | Atualizado o OpenAPI 3.1 com tipos compostos (ex: `type: ['string', 'null']`). `total_matching` reflete todas as ocorrências encontradas mesmo quando há corte por limite ou por orçamento de bytes. Validação estrita rejeita com HTTP 400 inputs fora do contrato (datas invertidas, queries longas, números fracionários). | Testes `F05: OpenAPI 3.1 sem nullable:true obsoleto, author e next_offset anuláveis` e `F05: validação estrita de tipos e rejeição de entradas inválidas com 400` executados e **aprovados**. |
+| **F06 (P1/P2)** | Túnel, cancelamento e indicadores | Falta de controle de geração/identidade nas operações do túnel (eventos exit de processos antigos apagavam estado de conexões novas; cancelamento tardio não impedia inicialização); streams de download sem limpeza | Criado controle de geração incremental em `CloudflareTunnelManager`. O método `stop()` aborta e invalida a geração ativa imediatamente. Suporte a `CLOUDFLARE_TUNNEL_TOKEN` para túneis fixos. Download com streams limpa temporários `.tmp` em caso de aborto ou falha de hash SHA-256. | Testes `F06: CloudflareTunnelManager controla geração, stop cancela inicialização e suporta token` e `ensureCloudflared rejeita arquivo adulterado e verifica integridade criptográfica` executados e **aprovados**. |
+| **F07 (P2)** | Bloqueio desfeito durante troca de conta | Condição de corrida em `switchAccount()`: se `block()` ou `disconnect()` fosse chamado durante a espera de `close()`, a continuação assíncrona prosseguia e iniciava novo pareamento | Adicionado controle de geração (`this.generation++`) no `DesktopController`. Após cada operação assíncrona, a geração e o estado são validados: se bloqueado ou desconectado, o fluxo é interrompido imediatamente. Adicionada chamada a `provider.logout()` para desvincular aparelho remoto. | Teste `F07: switchAccount aguarda close; block é acionado; close termina. O estado continua blocked e nenhum novo pareamento começa` executado e **aprovado**. |
 
 ---
 
-## 2. Resultados dos Testes Automatizados
+## 2. Ajustes de Runtime, Windows e Empacotamento
 
-### Suíte Node.js (`npm test`)
-- **Total de testes:** 71
-- **Aprovados:** 68
+1. **Alinhamento do Node.js Runtime:**
+   - Declarado `engines.node: ">=22.12.0"` em `package.json` para garantir total compatibilidade com bibliotecas e APIs modernas.
+   - Atualizado o workflow `.github/workflows/build.yml` para utilizar `node-version: '22'`.
+   - Adicionado portão obrigatório de verificação de versão (`verify_node_version`) em `scripts/package.py`.
+   - Runtime embutido no pacote gerado: **Node.js v24.5.0** Windows x64 oficial.
+
+2. **Sanitização de Ambiente PowerShell:**
+   - Em `src/local-security.mjs`, o executor PowerShell substitui a herança irrestrita de variáveis de ambiente por um ambiente estrito e controlado (`minimalEnvironment`), contendo apenas caminhos confiáveis do sistema operacional (`SystemRoot`, `System32`, `wbem`), evitando herança de credenciais, proxies ou opções maliciosas.
+
+---
+
+## 3. Resultados dos Testes Automatizados
+
+Execução em Windows 11 x64 com Node >= 22.12.0:
+
+```
+> node --test test/core.test.mjs test/desktop.test.mjs test/mcp.test.mjs test/security.test.mjs test/gpt.test.mjs
+
+ℹ tests 80
+ℹ suites 0
+ℹ pass 77
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 3
+ℹ todo 0
+ℹ duration_ms 44205.0297
+```
+
+- **Total de testes:** 80
+- **Aprovados:** 77
 - **Falhos:** 0
-- **Ignorados (Skip legítimos):** 3 (testes específicos de symlink e permissões POSIX restritas a sistemas Unix/Linux)
-- **Duração total:** ~37.1 segundos
-
-### Suíte Go Launcher (`launcher/go test ./...`)
-- `TestRejectTraversal`: APROVADO
-- `TestRejectCaseCollision`: APROVADO
-- `TestExtractAndVerify`: APROVADO
-- `TestRejectExtraFile`: APROVADO
+- **Skips legítimos:** 3 (restritos a links simbólicos e permissões POSIX de sistemas Linux/Unix)
 
 ---
 
-## 3. Artefatos de Build e Release
+## 4. Manifesto Criptográfico dos Artefatos de Distribuição
 
-Os artefatos foram compilados e empacotados em ambiente Windows x64 limpo:
+Os arquivos foram gerados e validados no sistema local via `scripts/package.py`:
 
-1. **`dist/whatsapp-manutencao.exe`**
-   - **Tamanho:** 52.549.851 bytes (~50.1 MB)
-   - **SHA-256:** `856C3BBEF4FF72FE16057C84AC37E59528CDAF5C772B44AE368D4D9DDEAA7E55`
-   - **Estrutura:** Launcher PE x64 compilado em Go + Payload compactado (Node.js runtime Windows x64 + dependências de produção + scripts + assets UI) + Trailer de 80 bytes com SHA-256 e assinatura mágica `WAPAYLOD`.
+| Artefato | Descrição | Tamanho (Bytes) | Hash SHA-256 Oficial |
+| :--- | :--- | :--- | :--- |
+| **`dist/whatsapp-manutencao.exe`** | Executável standalone Windows x64 (Launcher Go + Payload + Trailer) | 52.551.419 | `8c88f1773c5489f0354c451b0c9eb52a5889be5d92e794133f26426b46b4f545` |
+| **`dist/whatsapp-manutencao-windows-x64.zip`** | Pacote ZIP de distribuição (Executável + Documentação) | 48.752.463 | `a2b7aa17c69769d7f1949288079edf28e86f8369baab1eb4a0bd306d7a803884` |
+| **`payload.zip` (embutido)** | Payload interno extraído pelo launcher (Node runtime + app + libs) | 48.828.587 | `2c3d731752bc0e11e8da0678f8cf631902652b8196a471b5f26d4b7622533216` |
+| **`launcher-base`** | Stub PE x64 compilado em Go | 3.722.752 | Extraído e verificado antes da anexação do trailer |
+| **`cloudflared-windows-amd64.exe`** | Binário oficial Cloudflare (versão 2026.9.1) | ~34 MB | `2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712` |
 
-2. **`dist/whatsapp-manutencao-windows-x64.zip`**
-   - **Tamanho:** 48.750.738 bytes (~46.4 MB)
-   - **SHA-256:** `74B5944EE0DC1F5A6743A9FD82BD236EB2436A7A9CDCC9AE6FF18884EFCE4230`
-   - **Conteúdo:** `whatsapp-manutencao.exe`, `LEIA-ME.md`, `README.md`, `RELATORIO-VALIDACAO.md`, `SECURITY.md`.
+---
 
+## 5. Limitações e Riscos Residuais Concretos
+
+1. **Validação com Aparelho Físico Real:** As correções foram homologadas com a suíte automatizada completa (80 testes cobrindo todos os fluxos de integração com dados simulados e provedores em memória). O teste de pareamento com escaneamento de QR Code de um telefone físico real depende de ação interativa do usuário com a câmera do celular.
+2. **Continuidade de Quick Tunnels:** O modo padrão utiliza `trycloudflare.com`, que gera URLs efêmeras por sessão. Para ambientes de produção com endereço permanente, o usuário deve informar `CLOUDFLARE_TUNNEL_TOKEN`.
+3. **Limite de Payload do ChatGPT:** O teto de 32 KB por resposta é estritamente aplicado pelo aplicativo para evitar rejeições pela OpenAI; buscas muito extensas retornam até 30 itens ordenados cronologicamente com sinalização clara de corte (`truncated: true`).

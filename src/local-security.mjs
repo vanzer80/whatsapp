@@ -19,8 +19,12 @@ export function minimalEnvironment(source = process.env) {
 export function powershell(command, extraEnv = {}) {
   const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
   const binary = path.join(sysRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const env = minimalEnvironment();
+  env.SystemRoot = sysRoot;
+  env.WINDIR = sysRoot;
+  env.PATH = `${sysRoot}\\System32;${sysRoot};${sysRoot}\\System32\\WindowsPowerShell\\v1.0`;
   return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-InputFormat', 'None', '-ExecutionPolicy', 'Bypass', '-Command', command], {
-    env: { ...process.env, ...extraEnv }, encoding: 'utf8', timeout: 30000,
+    env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: 30000,
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024
   });
 }

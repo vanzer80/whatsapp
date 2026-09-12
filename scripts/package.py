@@ -165,6 +165,16 @@ def create_payload_zip(payload_path: Path, items: list[tuple[Path | bytes, str]]
     return sha256, size
 
 
+def verify_node_version(node_exe: Path) -> str:
+    res = subprocess.run([str(node_exe), "-v"], capture_output=True, text=True, check=True)
+    ver_str = res.stdout.strip()
+    ver = ver_str.lstrip("v")
+    parts = [int(p) for p in ver.split(".")[:3]]
+    if parts[0] < 22 or (parts[0] == 22 and parts[1] < 12):
+        raise ValueError(f"Versão do Node.js ({ver_str}) incompatível. Requer Node.js >= 22.12.0.")
+    return ver_str
+
+
 def package(node_exe_arg: str | None = None) -> None:
     DIST.mkdir(parents=True, exist_ok=True)
 
@@ -174,6 +184,8 @@ def package(node_exe_arg: str | None = None) -> None:
         raise FileNotFoundError(f"node.exe não encontrado em: {node_exe}")
     print(f"[*] Node runtime localizado: {node_exe}")
     verify_pe_x64(node_exe)
+    node_ver = verify_node_version(node_exe)
+    print(f"[*] Versão validada do Node runtime: {node_ver}")
 
     # 2. Check or build launcher stub
     stub_exe = DIST / "whatsapp-manutencao.exe"

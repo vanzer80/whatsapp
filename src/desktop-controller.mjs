@@ -103,21 +103,37 @@ export class DesktopController {
     } finally {this.changing=false;}
   }
   async disconnect() {
-    ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    const generation=++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
     const provider=this.provider;this.provider=null;
     try {this.revoke();}
-    finally {if(provider)await provider.close();}
+    finally {
+      if(provider) {
+        try {
+          if(typeof provider.logout==='function')await provider.logout();
+          else await provider.close();
+        } catch {}
+      }
+    }
+    if(generation!==this.generation)return;
+    clearSessionMaintenance();
   }
   async switchAccount() {
     if(this.changing)throw new Error('Aguarde a operação atual.');
     this.changing=true;
-    ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    const generation=++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
     const provider=this.provider;this.provider=null;
     try {
       this.revoke();
-      if(provider)await provider.close();
+      if(provider) {
+        try {
+          if(typeof provider.logout==='function')await provider.logout();
+          else await provider.close();
+        } catch {}
+      }
+      if(generation!==this.generation)return;
       clearSessionMaintenance();
     } finally {this.changing=false;}
+    if(generation!==this.generation)return;
     await this.connect({interactive:true});
   }
   async block() {

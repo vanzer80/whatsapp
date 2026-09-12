@@ -25,10 +25,10 @@ jobs:
           go-version: '>=1.23'
           cache: false
 
-      - name: Setup Node.js 20 LTS
+      - name: Setup Node.js 22 LTS
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Setup Python 3.12

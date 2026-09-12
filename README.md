@@ -39,14 +39,14 @@ A interface permite revogar acessos a qualquer momento, pausar/iniciar o túnel 
 
 ## Resultados dos Testes Automatizados
 
-Execução em Windows 11 x64 com Node v24 / Node 20 LTS:
-- **Suíte Node.js (`npm test`):** 71 testes (68 aprovados, 0 falhas, 3 skips de permissões e links específicos de POSIX/Linux). Duração: ~37 segundos.
+Execução em Windows 11 x64 com Node >= 22.12.0:
+- **Suíte Node.js (`npm test`):** 80 testes (77 aprovados, 0 falhas, 3 skips de permissões e links específicos de POSIX/Linux). Duração: ~44 segundos.
 - **Suíte Go Launcher (`go test ./...`):** 4 testes aprovados (rejeição de path traversal, colisão de case, extração segura com integridade e rejeição de arquivos estranhos).
-- **Compilação e Empacotamento (`package.py`):** Executável standalone gerado com sucesso (~52.5 MB) contendo runtime Node embutido, payload compactado e trailer criptográfico SHA-256.
+- **Compilação e Empacotamento (`package.py`):** Executável standalone gerado com sucesso (~52.5 MB) contendo runtime Node >= 22.12.0 embutido, payload compactado e trailer criptográfico SHA-256.
 
 ## Como Desenvolver e Compilar
 
-Requisitos para desenvolvimento: Node.js >= 20, Go 1.22+ e Python 3.10+.
+Requisitos para desenvolvimento: Node.js >= 22.12.0, Go 1.22+ e Python 3.10+.
 
 ```sh
 # Instalar dependências limpas

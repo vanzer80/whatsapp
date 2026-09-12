@@ -254,3 +254,88 @@ test('transporte fecha antes do MCP quando a autenticação está ausente ou inv
     clientSide.write(JSON.stringify(message)+'\n');await closed;assert.equal(received,0);clientSide.destroy();
   }
 });
+
+test('F07: switchAccount aguarda close; block é acionado; close termina. O estado continua blocked e nenhum novo pareamento começa', async t => {
+  const directory = sandbox(t);
+  const accessFile = path.join(directory, 'access.json');
+  savePolicy(ACCOUNT, [GROUP], accessFile);
+  const access = new AccessStore(accessFile);
+
+  let resolveClose;
+  const closePromise = new Promise(r => { resolveClose = r; });
+  let startCalls = 0;
+
+  const mockProvider = {
+    closed: false,
+    state: 'ready',
+    accountId: () => ACCOUNT,
+    status: () => ({ connected: true, state: 'ready' }),
+    start: async () => { startCalls++; },
+    close: async () => { await closePromise; mockProvider.closed = true; },
+    logout: async () => { await closePromise; mockProvider.closed = true; }
+  };
+
+  const control = new DesktopController({
+    access,
+    providerFactory: () => mockProvider,
+    browserAvailable: () => true
+  });
+  t.after(() => control.close());
+
+  control.provider = mockProvider;
+  control.phase = 'ready';
+
+  const switchPromise = control.switchAccount();
+  await control.block();
+  assert.equal(control.phase, 'blocked');
+
+  resolveClose();
+  await switchPromise;
+
+  assert.equal(control.phase, 'blocked');
+  assert.equal(startCalls, 0);
+  assert.equal(control.provider, null);
+});
+
+test('F03: subprocesso independente criado para o teste permanece vivo; encerramento autenticado via /api/shutdown', async t => {
+  const { spawn } = await import('node:child_process');
+  const { serviceFile } = await import('../src/desktop-process.mjs');
+  const { writePrivateJson } = await import('../src/local-security.mjs');
+
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], {
+    windowsHide: true,
+    stdio: 'ignore'
+  });
+  t.after(() => {
+    try { child.kill(); } catch {}
+  });
+
+  const childPid = child.pid;
+  assert.ok(childPid > 0);
+
+  const service = await startDesktopService({ writeDiscovery: false });
+  t.after(() => service.close());
+
+  const origin = service.discovery.origin;
+  const uiToken = service.discovery.ui_token;
+
+  const shutdownRes = await fetch(`${origin}/api/shutdown`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${uiToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: '{}'
+  });
+  assert.equal(shutdownRes.ok, true);
+
+  await new Promise(r => setTimeout(r, 200));
+
+  let alive = true;
+  try {
+    process.kill(childPid, 0);
+  } catch {
+    alive = false;
+  }
+  assert.equal(alive, true, 'Subprocesso independente jamais deve ser encerrado.');
+});

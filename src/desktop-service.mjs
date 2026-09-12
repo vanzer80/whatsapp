@@ -53,7 +53,7 @@ async function body(request) {
   if(!result||Array.isArray(result)||typeof result!=='object')throw new Error('Solicitação inválida.');
   return result;
 }
-export function createWebHandler(controller,connection,register=()=>{},gptHandler=null,tunnelManager=null) {
+export function createWebHandler(controller,connection,register=()=>{},gptHandler=null,tunnelManager=null,onShutdown=null) {
   return async(request,response)=>{
     const {origin,uiToken}=connection;
     let pathname,parsedUrl;
@@ -89,7 +89,7 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
           last_mcp_seen:connection.lastMcpSeen,
           gpt_token:connection.gptToken,
           public_url:connection.publicUrl,
-          tunnel_active:Boolean(connection.publicUrl),
+          tunnel_active:Boolean(connection.tunnelActive && connection.publicUrl),
           external_query_confirmed:Boolean(connection.externalQueryConfirmed),
           capabilities:connection.capabilities,
           build_id:connection.build_id
@@ -99,7 +99,7 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
       if(request.method==='GET'&&pathname==='/api/chats') {send(response,200,{chats:controller.phase==='choose'?controller.choices:[]});return;}
       if(request.method!=='POST'){send(response,404,{error:'Ação não encontrada.'});return;}
       const input=await body(request);
-      if(!['/api/authorize','/api/tunnel'].includes(pathname)&&Object.keys(input).length)throw new Error('Solicitação inválida.');
+      if(!['/api/authorize','/api/tunnel','/api/shutdown'].includes(pathname)&&Object.keys(input).length)throw new Error('Solicitação inválida.');
       if(pathname==='/api/setup') {register();connection.registered=true;await controller.connect();}
       else if(pathname==='/api/connect')await controller.connect();
       else if(pathname==='/api/edit')await controller.edit();
@@ -110,17 +110,24 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
       else if(pathname==='/api/block')await controller.block();
       else if(pathname==='/api/disconnect')await controller.disconnect();
       else if(pathname==='/api/switch-account')await controller.switchAccount();
+      else if(pathname==='/api/shutdown') {
+        send(response,200,{ok:true});
+        if(onShutdown)setTimeout(()=>onShutdown(),50);
+        return;
+      }
       else if(pathname==='/api/tunnel/start') {
         if(!tunnelManager)throw new Error('Gerenciador de túnel indisponível.');
         const port=new URL(origin).port;
         const res=await tunnelManager.start({localPort:port});
         connection.publicUrl=res.url;
+        connection.tunnelActive=true;
         send(response,200,{ok:true,url:res.url});
         return;
       }
       else if(pathname==='/api/tunnel/stop') {
         if(tunnelManager)tunnelManager.stop();
         connection.publicUrl=null;
+        connection.tunnelActive=false;
         send(response,200,{ok:true});
         return;
       }
@@ -129,6 +136,7 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
           throw new Error('URL de túnel HTTPS válida é obrigatória.');
         }
         connection.publicUrl=input.url;
+        connection.tunnelActive=true;
         send(response,200,{ok:true,url:input.url});
         return;
       }
@@ -176,7 +184,8 @@ export async function startDesktopService({controller=new DesktopController(),di
     server.connect(new PipeTransport(socket,ipcToken)).catch(()=>socket.destroy());
   });
   pipeServer.maxConnections=20;
-  const web=http.createServer(createWebHandler(controller,connection,register,gptHandler,tunnelManager));
+  let serviceHandle;
+  const web=http.createServer(createWebHandler(controller,connection,register,gptHandler,tunnelManager,()=>serviceHandle?.close()));
   web.maxConnections=50;web.maxHeadersCount=30;web.requestTimeout=10000;web.headersTimeout=10000;web.keepAliveTimeout=5000;
   const discoveryFile=path.join(directory,'desktop-service.json');
   let discovery;
@@ -208,7 +217,7 @@ export async function startDesktopService({controller=new DesktopController(),di
     if(controller.phase==='ready' && (!controller.provider?.status().connected || !controller.access.snapshot(controller.provider?.accountId())))
       void controller.block().catch(()=>controller.close());
   },1500);monitor.unref();
-  return {
+  serviceHandle = {
     discovery,
     controller,
     tunnelManager,
@@ -223,4 +232,5 @@ export async function startDesktopService({controller=new DesktopController(),di
       if(process.platform!=='win32'&&existsSync(pipe))unlinkSync(pipe);
     }
   };
+  return serviceHandle;
 }

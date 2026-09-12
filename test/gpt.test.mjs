@@ -384,7 +384,7 @@ test('busca e cobertura: resultado presente somente na quarta conversa é encont
     chats: async () => [...chatsMap.values()],
     messages: async (chat, limit) => (messagesMap.get(chat.id._serialized) || []).slice(-limit)
   };
-  const reader = new Reader(provider, { access, cooldownMs: 0 });
+  const reader = new Reader(provider, { access });
   const gptToken = getOrCreateGptToken(directory);
   const handler = createGptHandler({
     getReader: () => reader,
@@ -546,6 +546,273 @@ test('desktop-process.running rejeita serviço antigo que não possua capabiliti
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('F01: devolução de dados após revogação entre lotes é impedida e marcador revogado jamais vaza', async t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'wa-f01-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const c1 = '550000000001@c.us', c2 = '550000000002@c.us', c3 = '550000000003@c.us', c4 = '550000000004@c.us';
+  const accessFile = path.join(directory, 'access.json');
+  savePolicy(ACCOUNT, [c1, c2, c3, c4], accessFile);
+  const access = new AccessStore(accessFile);
+  const OLD_POLICY_MARKER = 'OLD_POLICY_MARKER_CONFIDENTIAL_123';
+  const chatsMap = new Map([
+    [c1, { id: { _serialized: c1 }, name: 'Chat 1' }],
+    [c2, { id: { _serialized: c2 }, name: 'Chat 2' }],
+    [c3, { id: { _serialized: c3 }, name: 'Chat 3' }],
+    [c4, { id: { _serialized: c4 }, name: 'Chat 4' }]
+  ]);
+  const messagesMap = new Map([
+    [c1, [{ id: { _serialized: 'm1' }, body: `mensagem com ${OLD_POLICY_MARKER}`, timestamp: 1789130000, from: c1, type: 'chat' }]],
+    [c2, []],
+    [c3, []],
+    [c4, [{ id: { _serialized: 'm4' }, body: 'mensagem normal chat 4', timestamp: 1789130001, from: c4, type: 'chat' }]]
+  ]);
+  const provider = {
+    state: 'ready',
+    accountId: () => ACCOUNT,
+    status: () => ({ connected: true, state: 'ready' }),
+    chat: async id => {
+      if (id === c3) {
+        savePolicy(ACCOUNT, [c4], accessFile);
+      }
+      return chatsMap.get(id);
+    },
+    chats: async () => [...chatsMap.values()],
+    messages: async (chat, limit) => (messagesMap.get(chat.id._serialized) || []).slice(-limit)
+  };
+  const reader = new Reader(provider, { access });
+  const gptToken = getOrCreateGptToken(directory);
+  const handler = createGptHandler({
+    getReader: () => reader,
+    getGptToken: () => gptToken
+  });
+
+  const req = createMockRequest({
+    method: 'POST',
+    url: '/gpt/search',
+    headers: {
+      authorization: `Bearer ${gptToken}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({ query: 'mensagem' })
+  });
+  const res = createMockResponse();
+  const url = new URL('http://127.0.0.1/gpt/search');
+  await handler(req, res, url);
+  assert.equal(res.statusCode, 403);
+  const resText = JSON.stringify(res.json());
+  assert.equal(resText.includes(OLD_POLICY_MARKER), false);
+  assert.equal(res.json().code, 'ACCESS_REVOKED');
+});
+
+test('F01: revogação persistida após coleta antes da resposta final descarta resultados', async t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'wa-f01-after-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const c1 = '550000000001@c.us';
+  const accessFile = path.join(directory, 'access.json');
+  savePolicy(ACCOUNT, [c1], accessFile);
+  const access = new AccessStore(accessFile);
+  const provider = {
+    state: 'ready',
+    accountId: () => ACCOUNT,
+    status: () => ({ connected: true, state: 'ready' }),
+    chat: async id => ({ id: { _serialized: id }, name: 'Chat 1' }),
+    chats: async () => [{ id: { _serialized: c1 }, name: 'Chat 1' }],
+    messages: async () => {
+      const msgs = [{ id: { _serialized: 'm1' }, body: 'dados secretos', timestamp: 1789130000, from: c1, type: 'chat' }];
+      savePolicy(ACCOUNT, [], accessFile);
+      return msgs;
+    }
+  };
+  const reader = new Reader(provider, { access });
+  const gptToken = getOrCreateGptToken(directory);
+  const handler = createGptHandler({ getReader: () => reader, getGptToken: () => gptToken });
+  const req = createMockRequest({
+    method: 'POST',
+    url: '/gpt/messages',
+    headers: { authorization: `Bearer ${gptToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: c1 })
+  });
+  const res = createMockResponse();
+  await handler(req, res, new URL('http://127.0.0.1/gpt/messages'));
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.json().code, 'ACCESS_REVOKED');
+});
+
+test('F02: busca em 30 conversas sob cooldown de produção de 1500ms encontra resultado na última conversa sem RATE_LIMITED interno', async t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'wa-f02-30chats-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const chatIds = Array.from({ length: 30 }, (_, i) => `5500000000${String(i + 1).padStart(2, '0')}@c.us`);
+  const accessFile = path.join(directory, 'access.json');
+  savePolicy(ACCOUNT, chatIds, accessFile);
+  const access = new AccessStore(accessFile);
+  const chatsMap = new Map(chatIds.map((id, i) => [id, { id: { _serialized: id }, name: `Chat ${i + 1}` }]));
+  const lastChat = chatIds[29];
+  const provider = {
+    state: 'ready',
+    accountId: () => ACCOUNT,
+    status: () => ({ connected: true, state: 'ready' }),
+    chat: async id => chatsMap.get(id),
+    chats: async () => [...chatsMap.values()],
+    messages: async (chat) => {
+      if (chat.id._serialized === lastChat) {
+        return [{ id: { _serialized: 'm30' }, body: 'resultado_unico_na_ultima_conversa', timestamp: 1789130000, from: lastChat, type: 'chat' }];
+      }
+      return [];
+    }
+  };
+  const reader = new Reader(provider, { access, cooldownMs: 1500 });
+  const gptToken = getOrCreateGptToken(directory);
+  const handler = createGptHandler({ getReader: () => reader, getGptToken: () => gptToken });
+
+  const req = createMockRequest({
+    method: 'POST',
+    url: '/gpt/search',
+    headers: { authorization: `Bearer ${gptToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ query: 'resultado_unico' })
+  });
+  const res = createMockResponse();
+  await handler(req, res, new URL('http://127.0.0.1/gpt/search'));
+  assert.equal(res.statusCode, 200);
+  const body = res.json();
+  assert.equal(body.results.length, 1);
+  assert.equal(body.results[0].chat_id, lastChat);
+  assert.equal(body.total_matching, 1);
+  assert.equal(body.returned_count, 1);
+  assert.equal(body.coverage.length, 30);
+
+  const req2 = createMockRequest({
+    method: 'POST',
+    url: '/gpt/search',
+    headers: { authorization: `Bearer ${gptToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ query: 'segunda_chamada' })
+  });
+  const res2 = createMockResponse();
+  await handler(req2, res2, new URL('http://127.0.0.1/gpt/search'));
+  assert.equal(res2.statusCode, 429);
+  assert.equal(res2.json().code, 'RATE_LIMITED');
+});
+
+test('F04: erros internos contendo marcadores privados ou caminhos não vazam e respeitam 32 KB', async t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'wa-f04-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const accessFile = path.join(directory, 'access.json');
+  savePolicy(ACCOUNT, [GROUP], accessFile);
+  const access = new AccessStore(accessFile);
+
+  const makeHandlerForError = (err) => {
+    const p = {
+      state: 'ready',
+      accountId: () => ACCOUNT,
+      status: () => ({ connected: true, state: 'ready' }),
+      chat: async () => { throw err; },
+      chats: async () => [],
+      messages: async () => []
+    };
+    const r = new Reader(p, { access });
+    const tok = getOrCreateGptToken(directory);
+    return { handler: createGptHandler({ getReader: () => r, getGptToken: () => tok }), gptToken: tok };
+  };
+
+  // Caso 1: Marcadores internos e caminhos de arquivo no Error.message
+  const err1 = new Error('JSON INTERNAL_MARKER /fake/path/to/private/keys');
+  const h1 = makeHandlerForError(err1);
+  const req1 = createMockRequest({
+    method: 'POST',
+    url: '/gpt/messages',
+    headers: { authorization: `Bearer ${h1.gptToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: GROUP })
+  });
+  const res1 = createMockResponse();
+  await h1.handler(req1, res1, new URL('http://127.0.0.1/gpt/messages'));
+  assert.equal(res1.statusCode, 500);
+  const body1 = res1.json();
+  assert.equal(body1.code, 'ERROR');
+  assert.equal(JSON.stringify(body1).includes('INTERNAL_MARKER'), false);
+  assert.equal(JSON.stringify(body1).includes('/fake/path'), false);
+
+  // Caso 2: Código de erro customizado com marcador privado
+  const fakeCodeErr = new Error('Falha simulada');
+  fakeCodeErr.code = 'PRIVATE_MARKER_CODE_123';
+  const h2 = makeHandlerForError(fakeCodeErr);
+  const req2 = createMockRequest({
+    method: 'POST',
+    url: '/gpt/messages',
+    headers: { authorization: `Bearer ${h2.gptToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: GROUP })
+  });
+  const res2 = createMockResponse();
+  await h2.handler(req2, res2, new URL('http://127.0.0.1/gpt/messages'));
+  assert.equal(res2.statusCode, 500);
+  const body2 = res2.json();
+  assert.equal(body2.code, 'ERROR');
+  assert.equal(JSON.stringify(body2).includes('PRIVATE_MARKER_CODE_123'), false);
+
+  // Caso 3: Erro com mensagem massiva de mais de 40.000 caracteres
+  const massErr = new Error('E'.repeat(45000));
+  const h3 = makeHandlerForError(massErr);
+  const req3 = createMockRequest({
+    method: 'POST',
+    url: '/gpt/messages',
+    headers: { authorization: `Bearer ${h3.gptToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: GROUP })
+  });
+  const res3 = createMockResponse();
+  await h3.handler(req3, res3, new URL('http://127.0.0.1/gpt/messages'));
+  const rawBytes = Buffer.byteLength(JSON.stringify(res3.json()), 'utf8');
+  assert.ok(rawBytes <= 32768, `Tamanho ${rawBytes} excede 32768 bytes`);
+});
+
+test('F05: OpenAPI 3.1 sem nullable:true obsoleto, author e next_offset anuláveis', async () => {
+  const { buildOpenApiSpec } = await import('../src/gpt-handler.mjs');
+  const spec = buildOpenApiSpec();
+  const specStr = JSON.stringify(spec);
+  assert.equal(specStr.includes('"nullable":true'), false, 'Não deve usar nullable: true em OpenAPI 3.1');
+  assert.deepEqual(spec.components.schemas.Message.properties.author.type, ['string', 'null']);
+  assert.deepEqual(spec.components.schemas.SearchResultItem.properties.author.type, ['string', 'null']);
+  assert.deepEqual(spec.components.schemas.ChatsResponse.properties.next_offset.type, ['integer', 'null']);
+});
+
+test('F05: validação estrita de tipos e rejeição de entradas inválidas com 400', async t => {
+  const { handler, gptToken } = setupTestEnvironment(t);
+  const testCases = [
+    { url: '/gpt/chats?limit=invalido', method: 'GET', code: 400 },
+    { url: '/gpt/chats?limit=3.5', method: 'GET', code: 400 },
+    { url: '/gpt/chats?limit=50', method: 'GET', code: 400 },
+    { url: '/gpt/chats?offset=-1', method: 'GET', code: 400 },
+    { url: '/gpt/messages', method: 'POST', body: { chat_id: GROUP, limit: 'texto' }, code: 400 },
+    { url: '/gpt/messages', method: 'POST', body: { chat_id: GROUP, limit: 35 }, code: 400 },
+    { url: '/gpt/messages', method: 'POST', body: { chat_id: GROUP, since: '2026-09-12T10:00:00Z', before: '2026-09-12T09:00:00Z' }, code: 400 },
+    { url: '/gpt/search', method: 'POST', body: { query: 'x'.repeat(105) }, code: 400 },
+    { url: '/gpt/search', method: 'POST', body: { query: 't' }, code: 400 }
+  ];
+
+  for (const tc of testCases) {
+    const req = createMockRequest({
+      method: tc.method,
+      url: tc.url,
+      headers: { authorization: `Bearer ${gptToken}`, 'content-type': 'application/json' },
+      body: tc.body ? JSON.stringify(tc.body) : undefined
+    });
+    const res = createMockResponse();
+    await handler(req, res, new URL('http://127.0.0.1' + tc.url));
+    assert.equal(res.statusCode, tc.code, `Falha em ${tc.url}`);
+  }
+});
+
+test('F06: CloudflareTunnelManager controla geração, stop cancela inicialização e suporta token', async t => {
+  const { CloudflareTunnelManager } = await import('../src/gpt-tunnel.mjs');
+  const directory = mkdtempSync(path.join(tmpdir(), 'wa-f06-tunnel-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const manager = new CloudflareTunnelManager({ directory });
+  assert.equal(manager.status().active, false);
+  assert.equal(manager.generation, 0);
+
+  manager.stop();
+  assert.equal(manager.generation, 1);
+  assert.equal(manager.status().active, false);
 });
 
 

@@ -25,8 +25,8 @@ export async function running() {
     const r=await fetch(d.origin+'/api/status',{headers:{Authorization:`Bearer ${d.ui_token}`},redirect:'error',signal:AbortSignal.timeout(1500)});
     if(!r.ok)return null;
     const state=await r.json();
-    if(state.version!=='0.3.0')return null;
-    if(!Array.isArray(state.capabilities)||!state.capabilities.includes('gpt_actions'))return null;
+    if(state.version!=='0.3.0'||state.build_id!=='0.3.0-r2')return null;
+    if(!Array.isArray(state.capabilities)||!state.capabilities.includes('mcp_reader')||!state.capabilities.includes('gpt_actions'))return null;
     return d;
   }catch{return null;}
 }
@@ -35,8 +35,17 @@ export async function ensureRunning() {
   const existing=await running();
   if(existing)return existing;
   const oldDisc=readDiscovery();
-  if(oldDisc?.pid) {
-    try { process.kill(oldDisc.pid); } catch {}
+  if(oldDisc?.origin && oldDisc?.ui_token) {
+    try {
+      await fetch(oldDisc.origin+'/api/shutdown',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:`Bearer ${oldDisc.ui_token}`},
+        body:'{}',
+        redirect:'error',
+        signal:AbortSignal.timeout(1500)
+      });
+      await new Promise(resolve=>setTimeout(resolve,300));
+    } catch {}
   }
   const env=minimalEnvironment();
   if (process.platform === 'win32') {

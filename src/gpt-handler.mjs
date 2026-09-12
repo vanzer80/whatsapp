@@ -9,27 +9,56 @@ function equal(a, b) {
 }
 
 function sendJson(response, statusCode, data, headers = {}) {
+  let bodyStr = JSON.stringify(data);
+  if (Buffer.byteLength(bodyStr, 'utf8') > MAX_RESPONSE_BYTES) {
+    if (typeof data?.error === 'string') {
+      const maxMsgBytes = MAX_RESPONSE_BYTES - 200;
+      const truncatedError = Buffer.from(data.error, 'utf8').subarray(0, maxMsgBytes).toString('utf8');
+      bodyStr = JSON.stringify({ ...data, error: truncatedError, truncated: true });
+    }
+  }
+  const payloadBuf = Buffer.from(bodyStr, 'utf8');
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': String(payloadBuf.length),
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept',
     'Cache-Control': 'no-store',
     ...headers
   });
-  response.end(JSON.stringify(data));
+  response.end(payloadBuf);
 }
+
+export const SAFE_PUBLIC_ERRORS = {
+  ACCESS_NOT_CONFIGURED: { status: 403, error: 'Nenhuma conversa autorizada para esta conta.' },
+  ACCESS_REVOKED: { status: 403, error: 'A autorização local mudou. Esta resposta foi descartada.' },
+  CHAT_NOT_ALLOWED: { status: 403, error: 'Conversa fora da lista local de acesso.' },
+  FORBIDDEN: { status: 403, error: 'Acesso negado.' },
+  RATE_LIMITED: { status: 429, error: 'Aguarde alguns segundos antes da próxima consulta.' },
+  BUSY: { status: 429, error: 'Uma consulta já está em andamento. Aguarde sua conclusão.' },
+  NOT_CONNECTED: { status: 503, error: 'Abra o aplicativo WhatsApp Manutenção e conecte seu WhatsApp.' },
+  SERVICE_UNAVAILABLE: { status: 503, error: 'Serviço WhatsApp não inicializado.' },
+  UNAUTHORIZED: { status: 401, error: 'Autenticação necessária. Forneça o token correto no cabeçalho Authorization: Bearer <token>.' },
+  INVALID_ARGUMENTS: { status: 400, error: 'Confira os IDs, os limites e as datas com fuso horário.' },
+  INVALID_ARGUMENT: { status: 400, error: 'Parâmetros de consulta inválidos.' },
+  INVALID_RANGE: { status: 400, error: 'O início deve ser anterior ao fim.' },
+  PAYLOAD_TOO_LARGE: { status: 400, error: 'Corpo da requisição excede o limite permitido (16 KB).' },
+  RESPONSE_TOO_LARGE: { status: 400, error: 'A resposta excede o limite de dados. Reduza a consulta.' },
+  UNKNOWN_TOOL: { status: 400, error: 'Ferramenta indisponível. Este plugin oferece somente consultas.' },
+  NOT_FOUND: { status: 404, error: 'Endpoint não encontrado.' }
+};
 
 async function parseBody(request, limit = 16384) {
   const contentType = request.headers['content-type'] ?? '';
   if (!/^application\/json(?:;|$)/i.test(contentType)) {
-    throw new Error('Tipo de conteúdo deve ser application/json.');
+    throw new ReadError('INVALID_ARGUMENT', 'Tipo de conteúdo deve ser application/json.');
   }
   const chunks = [];
   let length = 0;
   for await (const chunk of request) {
     length += chunk.length;
-    if (length > limit) throw new Error('Corpo da requisição excede o limite permitido (16 KB).');
+    if (length > limit) throw new ReadError('PAYLOAD_TOO_LARGE', 'Corpo da requisição excede o limite permitido (16 KB).');
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString('utf8');
@@ -37,12 +66,12 @@ async function parseBody(request, limit = 16384) {
   try {
     const data = JSON.parse(raw);
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
-      throw new Error('Corpo da requisição deve ser um objeto JSON.');
+      throw new ReadError('INVALID_ARGUMENT', 'Corpo da requisição deve ser um objeto JSON.');
     }
     return data;
   } catch (err) {
-    if (err.message.includes('Corpo da requisição')) throw err;
-    throw new Error('Formato JSON inválido.');
+    if (err instanceof ReadError) throw err;
+    throw new ReadError('INVALID_ARGUMENT', 'Formato JSON inválido.');
   }
 }
 
@@ -101,7 +130,10 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
             name: { type: 'string', description: 'Nome do contato ou grupo.' },
             is_group: { type: 'boolean', description: 'Indica se a conversa é um grupo.' },
             unread_count: { type: 'integer', description: 'Quantidade de mensagens não lidas.' },
-            last_activity: { type: 'string', format: 'date-time', nullable: true, description: 'Data/hora da última atividade.' }
+            last_activity: {
+              anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
+              description: 'Data/hora da última atividade.'
+            }
           },
           required: ['chat_id', 'name', 'is_group', 'unread_count']
         },
@@ -114,7 +146,10 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
               description: 'Lista de conversas autorizadas na allowlist.'
             },
             total_matching: { type: 'integer', description: 'Total de conversas autorizadas correspondentes.' },
-            next_offset: { type: 'integer', nullable: true, description: 'Cursor para a próxima página.' },
+            next_offset: {
+              type: ['integer', 'null'],
+              description: 'Cursor para a próxima página.'
+            },
             retrieved_at: { type: 'string', format: 'date-time', description: 'Timestamp da consulta.' }
           },
           required: ['chats', 'total_matching', 'retrieved_at']
@@ -134,7 +169,10 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
           properties: {
             message_id: { type: 'string', description: 'Identificador único da mensagem.' },
             timestamp: { type: 'string', format: 'date-time', description: 'Data/hora de envio.' },
-            author: { type: 'string', description: 'Pseudônimo ou nome do autor (nunca expõe número de telefone).' },
+            author: {
+              type: ['string', 'null'],
+              description: 'Pseudônimo ou nome do autor (nunca expõe número de telefone).'
+            },
             text: { type: 'string', description: 'Conteúdo textual da mensagem.' },
             truncated: { type: 'boolean', description: 'Indica se o texto foi cortado por limite de tamanho.' },
             text_truncated: { type: 'boolean', description: 'Alias para conformidade com o formato do leitor.' }
@@ -175,7 +213,10 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
             chat_id: { type: 'string', description: 'Identificador da conversa onde a mensagem foi encontrada.' },
             message_id: { type: 'string', description: 'Identificador da mensagem.' },
             timestamp: { type: 'string', format: 'date-time', description: 'Data/hora da mensagem.' },
-            author: { type: 'string', description: 'Pseudônimo ou nome do autor.' },
+            author: {
+              type: ['string', 'null'],
+              description: 'Pseudônimo ou nome do autor.'
+            },
             text: { type: 'string', description: 'Conteúdo textual da mensagem correspondente.' },
             truncated: { type: 'boolean', description: 'Indica se o texto foi cortado.' },
             text_truncated: { type: 'boolean', description: 'Indica se o texto foi cortado.' }
@@ -188,8 +229,14 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
             chat_id: { type: 'string', description: 'Identificador da conversa examinada.' },
             scanned_count: { type: 'integer', description: 'Total de mensagens examinadas nesta conversa.' },
             requested_scan_limit: { type: 'integer', description: 'Limite de varredura configurado.' },
-            oldest_scanned: { type: 'string', format: 'date-time', nullable: true, description: 'Data da mensagem mais antiga examinada.' },
-            newest_scanned: { type: 'string', format: 'date-time', nullable: true, description: 'Data da mensagem mais recente examinada.' },
+            oldest_scanned: {
+              anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
+              description: 'Data da mensagem mais antiga examinada.'
+            },
+            newest_scanned: {
+              anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }],
+              description: 'Data da mensagem mais recente examinada.'
+            },
             complete_history: { type: 'boolean', description: 'Indica se todo o histórico foi coberto.' }
           },
           required: ['chat_id', 'scanned_count', 'complete_history']
@@ -204,6 +251,8 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
               description: 'Mensagens encontradas correspondentes à busca.'
             },
             total_matching: { type: 'integer', description: 'Total de mensagens correspondentes encontradas.' },
+            returned_count: { type: 'integer', description: 'Quantidade de mensagens retornadas nesta consulta.' },
+            has_more: { type: 'boolean', description: 'Indica se há mais mensagens correspondentes que excederam o limite ou o orçamento.' },
             coverage: {
               type: 'array',
               items: { $ref: '#/components/schemas/CoverageItem' },
@@ -211,7 +260,7 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
             },
             disclaimer: { type: 'string', description: 'Aviso de segurança sobre os resultados.' }
           },
-          required: ['query', 'results', 'total_matching']
+          required: ['query', 'results', 'total_matching', 'returned_count']
         }
       }
     },
@@ -440,6 +489,12 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
     }
 
     try {
+      function assertPolicyCurrent(initialPolicy, initialAccountId) {
+        if (!initialPolicy || !reader.access.unchanged(initialPolicy, initialAccountId)) {
+          throw new ReadError('ACCESS_REVOKED', 'A autorização local mudou. Esta resposta foi descartada.');
+        }
+      }
+
       if (pathname === '/gpt/status' && request.method === 'GET') {
         const result = await reader.execute('get_status', {});
         onExternalQuery();
@@ -449,13 +504,36 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
 
       if (pathname === '/gpt/chats' && request.method === 'GET') {
         const query = parsedUrl.searchParams.get('query') || undefined;
+        if (query !== undefined && (typeof query !== 'string' || query.length > 200)) {
+          throw new ReadError('INVALID_ARGUMENT', 'O parâmetro query excede o tamanho permitido.');
+        }
         const limitStr = parsedUrl.searchParams.get('limit');
+        let limit = 30;
+        if (limitStr !== null) {
+          if (!/^\d+$/.test(limitStr)) throw new ReadError('INVALID_ARGUMENT', 'O parâmetro limit deve ser um número inteiro.');
+          limit = parseInt(limitStr, 10);
+          if (limit < 1 || limit > 30) throw new ReadError('INVALID_ARGUMENT', 'O parâmetro limit deve estar entre 1 e 30.');
+        }
         const offsetStr = parsedUrl.searchParams.get('offset');
-        const limit = limitStr ? parseInt(limitStr, 10) : 30;
-        const offset = offsetStr ? parseInt(offsetStr, 10) : 0;
-        const args = { limit: Math.min(Math.max(limit, 1), 30), offset: Math.max(offset, 0) };
+        let offset = 0;
+        if (offsetStr !== null) {
+          if (!/^\d+$/.test(offsetStr)) throw new ReadError('INVALID_ARGUMENT', 'O parâmetro offset deve ser um número inteiro.');
+          offset = parseInt(offsetStr, 10);
+          if (offset < 0) throw new ReadError('INVALID_ARGUMENT', 'O parâmetro offset é inválido.');
+        }
+
+        const initialAccountId = reader.provider.accountId();
+        const initialPolicy = reader.access.snapshot(initialAccountId);
+        if (!initialPolicy) {
+          throw new ReadError('ACCESS_NOT_CONFIGURED', 'Nenhuma conversa autorizada para esta conta.');
+        }
+        assertPolicyCurrent(initialPolicy, initialAccountId);
+
+        const args = { limit, offset };
         if (query) args.query = query;
         const result = await reader.execute('list_chats', args);
+        assertPolicyCurrent(initialPolicy, initialAccountId);
+
         onExternalQuery();
         sendJson(response, 200, result);
         return true;
@@ -464,20 +542,45 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
       if (pathname === '/gpt/messages' && request.method === 'POST') {
         const input = await parseBody(request);
         if (!input.chat_id || typeof input.chat_id !== 'string') {
-          sendJson(response, 400, { error: 'O campo chat_id é obrigatório e deve ser uma string.', code: 'INVALID_ARGUMENT' });
-          return true;
+          throw new ReadError('INVALID_ARGUMENT', 'O campo chat_id é obrigatório e deve ser uma string.');
         }
-        const args = {
-          chat_id: input.chat_id,
-          limit: typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 30) : 20
-        };
+        let limit = 20;
+        if (input.limit !== undefined) {
+          if (typeof input.limit !== 'number' || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 30) {
+            throw new ReadError('INVALID_ARGUMENT', 'O campo limit deve ser um número inteiro entre 1 e 30.');
+          }
+          limit = input.limit;
+        }
+        if (input.since !== undefined) {
+          if (typeof input.since !== 'string' || isNaN(Date.parse(input.since))) {
+            throw new ReadError('INVALID_ARGUMENT', 'O campo since deve ser uma data válida no formato ISO 8601.');
+          }
+        }
+        if (input.before !== undefined) {
+          if (typeof input.before !== 'string' || isNaN(Date.parse(input.before))) {
+            throw new ReadError('INVALID_ARGUMENT', 'O campo before deve ser uma data válida no formato ISO 8601.');
+          }
+        }
+        if (input.since && input.before && Date.parse(input.since) >= Date.parse(input.before)) {
+          throw new ReadError('INVALID_RANGE', 'O início deve ser anterior ao fim.');
+        }
+
+        const initialAccountId = reader.provider.accountId();
+        const initialPolicy = reader.access.snapshot(initialAccountId);
+        if (!initialPolicy || !initialPolicy.allowed_chat_ids?.includes(input.chat_id)) {
+          throw new ReadError('CHAT_NOT_ALLOWED', 'Conversa fora da lista local de acesso.');
+        }
+        assertPolicyCurrent(initialPolicy, initialAccountId);
+
+        const args = { chat_id: input.chat_id, limit };
         if (input.since) args.since = input.since;
         if (input.before) args.before = input.before;
         const result = await reader.execute('read_messages', args);
-        onExternalQuery();
+        assertPolicyCurrent(initialPolicy, initialAccountId);
 
         const messages = (result.messages || []).map(m => ({
           ...m,
+          author: m.author ?? null,
           truncated: Boolean(m.text_truncated)
         }));
 
@@ -496,6 +599,10 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
           responseData.retrieved_count = responseData.messages.length;
         }
 
+        // Revalidação imediata antes de emitir a resposta final (F01)
+        assertPolicyCurrent(initialPolicy, initialAccountId);
+
+        onExternalQuery();
         sendJson(response, 200, responseData);
         return true;
       }
@@ -503,64 +610,92 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
       if (pathname === '/gpt/search' && request.method === 'POST') {
         const input = await parseBody(request);
         if (!input.query || typeof input.query !== 'string' || input.query.trim().length < 2) {
-          sendJson(response, 400, { error: 'O campo query é obrigatório e deve conter pelo menos 2 caracteres.', code: 'INVALID_ARGUMENT' });
-          return true;
+          throw new ReadError('INVALID_ARGUMENT', 'O campo query é obrigatório e deve conter pelo menos 2 caracteres.');
+        }
+        if (input.query.length > 100) {
+          throw new ReadError('INVALID_ARGUMENT', 'O campo query não pode exceder 100 caracteres.');
         }
 
-        const policy = reader.access.snapshot(reader.provider.accountId());
-        if (!policy || !policy.allowed_chat_ids?.length) {
+        let requestedLimit = 20;
+        if (input.limit !== undefined) {
+          if (typeof input.limit !== 'number' || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 30) {
+            throw new ReadError('INVALID_ARGUMENT', 'O campo limit deve ser um número inteiro entre 1 e 30.');
+          }
+          requestedLimit = input.limit;
+        }
+        if (input.since !== undefined) {
+          if (typeof input.since !== 'string' || isNaN(Date.parse(input.since))) {
+            throw new ReadError('INVALID_ARGUMENT', 'O campo since deve ser uma data válida no formato ISO 8601.');
+          }
+        }
+        if (input.before !== undefined) {
+          if (typeof input.before !== 'string' || isNaN(Date.parse(input.before))) {
+            throw new ReadError('INVALID_ARGUMENT', 'O campo before deve ser uma data válida no formato ISO 8601.');
+          }
+        }
+        if (input.since && input.before && Date.parse(input.since) >= Date.parse(input.before)) {
+          throw new ReadError('INVALID_RANGE', 'O início deve ser anterior ao fim.');
+        }
+
+        const initialAccountId = reader.provider.accountId();
+        const initialPolicy = reader.access.snapshot(initialAccountId);
+        if (!initialPolicy || !initialPolicy.allowed_chat_ids?.length) {
           throw new ReadError('ACCESS_NOT_CONFIGURED', 'Nenhuma conversa autorizada para esta conta.');
         }
 
         let targetChatIds;
         if (Array.isArray(input.chat_ids) && input.chat_ids.length > 0) {
-          const invalid = input.chat_ids.find(id => typeof id !== 'string' || !policy.allowed_chat_ids.includes(id));
+          const invalid = input.chat_ids.find(id => typeof id !== 'string' || !initialPolicy.allowed_chat_ids.includes(id));
           if (invalid) {
             throw new ReadError('CHAT_NOT_ALLOWED', `Conversa fora da lista local de acesso: ${invalid}`);
           }
           targetChatIds = [...new Set(input.chat_ids)];
         } else {
-          targetChatIds = [...policy.allowed_chat_ids];
+          targetChatIds = [...initialPolicy.allowed_chat_ids];
         }
 
-        const requestedLimit = typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 30) : 20;
-        const allMessages = [];
-        const aggregatedCoverage = [];
+        assertPolicyCurrent(initialPolicy, initialAccountId);
 
-        // Busca em lotes de até 3 conversas sem descarte silencioso
-        for (let i = 0; i < targetChatIds.length; i += 3) {
-          const chunk = targetChatIds.slice(i, i + 3);
-          const chunkResult = await reader.execute('search_messages', {
-            query: input.query.trim(),
-            chat_ids: chunk,
-            limit: requestedLimit
-          });
-          if (chunkResult.messages) allMessages.push(...chunkResult.messages);
-          if (chunkResult.coverage) aggregatedCoverage.push(...chunkResult.coverage);
-        }
+        // Uma única unidade de execução lógica em Reader.execute para a busca completa (F02)
+        const searchArgs = {
+          query: input.query.trim(),
+          chat_ids: targetChatIds,
+          limit: requestedLimit
+        };
+        if (input.since) searchArgs.since = input.since;
+        if (input.before) searchArgs.before = input.before;
 
-        onExternalQuery();
+        const result = await reader.execute('search_messages', searchArgs);
+        assertPolicyCurrent(initialPolicy, initialAccountId);
 
-        allMessages.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.message_id.localeCompare(b.message_id));
-        const finalResults = allMessages.slice(-requestedLimit).map(m => ({
+        const rawMessages = result.messages || [];
+        const finalResults = rawMessages.map(m => ({
           ...m,
+          author: m.author ?? null,
           truncated: Boolean(m.text_truncated)
         }));
 
         let responseData = {
           query: input.query.trim(),
           results: finalResults,
-          total_matching: allMessages.length,
-          coverage: aggregatedCoverage,
-          disclaimer: 'Janela recente e limitada nas conversas autorizadas.'
+          total_matching: result.matching_in_scanned_window ?? finalResults.length,
+          returned_count: finalResults.length,
+          has_more: Boolean(result.result_truncated),
+          coverage: result.coverage || [],
+          disclaimer: result.note || 'Janela recente e limitada nas conversas autorizadas.'
         };
 
-        // Validação estrita do teto de bytes (sem duplicação de mensagens)
+        // Validação estrita do teto de bytes preservando total_matching (F04 e F05)
         while (Buffer.byteLength(JSON.stringify(responseData), 'utf8') > MAX_RESPONSE_BYTES && responseData.results.length) {
           responseData.results.shift();
-          responseData.total_matching = responseData.results.length;
+          responseData.returned_count = responseData.results.length;
+          responseData.has_more = true;
         }
 
+        // Revalidação imediata antes de emitir resposta final (F01)
+        assertPolicyCurrent(initialPolicy, initialAccountId);
+
+        onExternalQuery();
         sendJson(response, 200, responseData);
         return true;
       }
@@ -568,26 +703,18 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
       sendJson(response, 404, { error: 'Endpoint não encontrado.', code: 'NOT_FOUND' });
       return true;
     } catch (err) {
-      const isForbidden = err.code === 'ACCESS_NOT_CONFIGURED' || err.code === 'FORBIDDEN' || err.code === 'CHAT_NOT_ALLOWED';
-      const isRateLimit = err.code === 'RATE_LIMITED' || err.code === 'BUSY';
-      const isNotConnected = err.code === 'NOT_CONNECTED';
-      const status = isForbidden ? 403 : isRateLimit ? 429 : isNotConnected ? 503 : 400;
-
-      // Sanitização de erros para não expor caminhos de arquivo, variáveis de ambiente ou detalhes de bibliotecas
-      const isBadInput = err.code === 'INVALID_ARGUMENTS' || err.code === 'INVALID_ARGUMENT' || err.code === 'INVALID_RANGE' || /excede o limite|JSON|conteúdo|obrigatório/.test(err.message || '');
-      const safeError = isForbidden
-        ? (err.message || 'Conversa não autorizada.')
-        : isRateLimit
-        ? 'Aguarde alguns instantes antes da próxima consulta.'
-        : isNotConnected
-        ? 'O WhatsApp não está conectado no aplicativo local.'
-        : isBadInput
-        ? (err.message || 'Parâmetros de consulta inválidos.')
-        : 'Falha ao processar consulta.';
-
+      let code = typeof err?.code === 'string' && SAFE_PUBLIC_ERRORS[err.code] ? err.code : 'ERROR';
+      let entry = SAFE_PUBLIC_ERRORS[code];
+      let status = entry ? entry.status : 500;
+      let safeMsg = entry ? entry.error : 'Falha ao processar consulta.';
+      if (err?.message && (code === 'INVALID_ARGUMENT' || code === 'INVALID_RANGE' || code === 'CHAT_NOT_ALLOWED')) {
+        if (!/INTERNAL_MARKER|fake|\/|\\|node_modules|Error:|stack/i.test(err.message)) {
+          safeMsg = err.message.slice(0, 300);
+        }
+      }
       sendJson(response, status, {
-        error: safeError,
-        code: err.code || 'ERROR'
+        error: safeMsg,
+        code
       });
       return true;
     }
