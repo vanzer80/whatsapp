@@ -12,18 +12,24 @@ export function dataDirectory() {
 export function minimalEnvironment(source = process.env) {
   const keep = new Set(['systemroot','windir','comspec','userprofile','homedrive','homepath',
     'localappdata','appdata','programfiles','programfiles(x86)','programw6432',
+    'systemdrive','pathext','userdomain','username','computername',
     'temp','tmp','tmpdir','home','lang','lc_all','display','wayland_display','xdg_runtime_dir']);
   return Object.fromEntries(Object.entries(source).filter(([key]) => keep.has(key.toLowerCase())));
 }
 
 export function powershell(command, extraEnv = {}) {
-  const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+  const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
   const binary = path.join(sysRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
   const safeEnv = minimalEnvironment();
   if (process.platform === 'win32') {
     safeEnv.PATH = `${sysRoot}\\System32;${sysRoot};${sysRoot}\\System32\\WindowsPowerShell\\v1.0`;
+    safeEnv.PATHEXT = process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC';
+    if (process.env.SystemDrive) safeEnv.SystemDrive = process.env.SystemDrive;
+    if (process.env.USERDOMAIN) safeEnv.USERDOMAIN = process.env.USERDOMAIN;
+    if (process.env.USERNAME) safeEnv.USERNAME = process.env.USERNAME;
+    if (process.env.COMPUTERNAME) safeEnv.COMPUTERNAME = process.env.COMPUTERNAME;
   }
-  return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
+  return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
     env: { ...safeEnv, ...extraEnv }, encoding: 'utf8', timeout: 30000,
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024
   });
@@ -52,18 +58,18 @@ export function secureDirectory(directory = dataDirectory()) {
       $item=Get-Item -LiteralPath $env:WA_SECURE_DIRECTORY -Force;
       if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point'; }
       $me=[Security.Principal.WindowsIdentity]::GetCurrent().User;
-      $adminSid='S-1-5-32-544';
+      $adminSid=[Security.Principal.SecurityIdentifier]'S-1-5-32-544';
+      $systemSid=[Security.Principal.SecurityIdentifier]'S-1-5-18';
       $old=$item.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner);
-      $owner=$old.GetOwner([Security.Principal.SecurityIdentifier]).Value;
-      if ($owner -ne $me.Value -and $owner -ne $adminSid) { throw 'Owner mismatch'; }
+      $owner=$old.GetOwner([Security.Principal.SecurityIdentifier]);
+      if ($owner -ne $me -and $owner -ne $adminSid) { throw 'Owner mismatch'; }
       $dir=[System.IO.DirectoryInfo]::new($item.FullName);
       $acl=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
       $acl.SetAccessRuleProtection($true,$false);
-      foreach ($rule in @($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))) {
-        $acl.PurgeAccessRules($rule.IdentityReference);
-      }
-      $allowedSids = @($me, ([Security.Principal.SecurityIdentifier]'S-1-5-18'));
-      if ($owner -eq $adminSid) { $allowedSids += [Security.Principal.SecurityIdentifier]$adminSid; }
+      $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));
+      foreach ($r in $rules) { [void]$acl.RemoveAccessRuleSpecific($r); }
+      $allowedSids=@($me,$systemSid);
+      if ($owner -eq $adminSid) { $allowedSids += $adminSid; }
       foreach ($sid in $allowedSids) {
         $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);
         $acl.AddAccessRule($rule);
@@ -72,8 +78,8 @@ export function secureDirectory(directory = dataDirectory()) {
       $check=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
       if (!$check.AreAccessRulesProtected) { throw 'ACL not protected'; }
       foreach ($rule in $check.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier])) {
-        $sid=$rule.IdentityReference.Value;
-        if ($sid -ne $me.Value -and $sid -ne 'S-1-5-18' -and $sid -ne $adminSid) { throw 'Unexpected access rule'; }
+        $sid=$rule.IdentityReference;
+        if ($sid -ne $me -and $sid -ne $systemSid -and $sid -ne $adminSid) { throw 'Unexpected access rule'; }
       }`, { WA_SECURE_DIRECTORY: directory });
   } else {
     if (lstatSync(directory).uid !== process.getuid()) throw new Error('A pasta local pertence a outro usuário.');
