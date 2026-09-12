@@ -16,13 +16,27 @@ export function minimalEnvironment(source = process.env) {
   return Object.fromEntries(Object.entries(source).filter(([key]) => keep.has(key.toLowerCase())));
 }
 
+function safePowerShellEnv(source = process.env) {
+  const blockedKeys = new Set([
+    'node_options', 'node_path', 'pythonpath',
+    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+    'openai_api_key', 'aws_secret_access_key', 'aws_access_key_id',
+    'gh_token', 'github_token', 'control_plane_api_key', 'control_plane_base_url',
+    'wa_allowed_chat_ids', 'wa_chrome_path', 'wa_tunnel_client', 'log_http_raw_unsafe'
+  ]);
+  const safe = {};
+  for (const [k, v] of Object.entries(source)) {
+    const lk = k.toLowerCase();
+    if (blockedKeys.has(lk) || lk.startsWith('npm_') || lk.startsWith('github_') || lk.startsWith('runner_') || lk.startsWith('actions_')) continue;
+    safe[k] = v;
+  }
+  return safe;
+}
+
 export function powershell(command, extraEnv = {}) {
   const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
   const binary = path.join(sysRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const env = minimalEnvironment();
-  env.SystemRoot = sysRoot;
-  env.WINDIR = sysRoot;
-  env.PATH = `${sysRoot}\\System32;${sysRoot};${sysRoot}\\System32\\WindowsPowerShell\\v1.0`;
+  const env = safePowerShellEnv(process.env);
   return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-InputFormat', 'None', '-ExecutionPolicy', 'Bypass', '-Command', command], {
     env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: 30000,
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024

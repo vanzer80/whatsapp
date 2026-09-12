@@ -298,7 +298,7 @@ test('F07: switchAccount aguarda close; block é acionado; close termina. O esta
 });
 
 test('F03: subprocesso independente criado para o teste permanece vivo; encerramento autenticado via /api/shutdown', async t => {
-  const { spawn } = await import('node:child_process');
+  const { spawn, execSync } = await import('node:child_process');
   const { serviceFile } = await import('../src/desktop-process.mjs');
   const { writePrivateJson } = await import('../src/local-security.mjs');
 
@@ -306,8 +306,15 @@ test('F03: subprocesso independente criado para o teste permanece vivo; encerram
     windowsHide: true,
     stdio: 'ignore'
   });
+  child.unref();
   t.after(() => {
-    try { child.kill(); } catch {}
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /F /PID ${child.pid}`, { stdio: 'ignore' });
+      } else {
+        child.kill('SIGKILL');
+      }
+    } catch {}
   });
 
   const childPid = child.pid;

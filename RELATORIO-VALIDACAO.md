@@ -64,9 +64,9 @@ Os arquivos foram gerados e validados no sistema local via `scripts/package.py`:
 
 | Artefato | Descrição | Tamanho (Bytes) | Hash SHA-256 Oficial |
 | :--- | :--- | :--- | :--- |
-| **`dist/whatsapp-manutencao.exe`** | Executável standalone Windows x64 (Launcher Go + Payload + Trailer) | 52.551.419 | `8c88f1773c5489f0354c451b0c9eb52a5889be5d92e794133f26426b46b4f545` |
-| **`dist/whatsapp-manutencao-windows-x64.zip`** | Pacote ZIP de distribuição (Executável + Documentação) | 48.752.463 | `a2b7aa17c69769d7f1949288079edf28e86f8369baab1eb4a0bd306d7a803884` |
-| **`payload.zip` (embutido)** | Payload interno extraído pelo launcher (Node runtime + app + libs) | 48.828.587 | `2c3d731752bc0e11e8da0678f8cf631902652b8196a471b5f26d4b7622533216` |
+| **`dist/whatsapp-manutencao.exe`** | Executável standalone Windows x64 (Launcher Go + Payload + Trailer) | 52.551.649 | `690102f2a7cb2cd368283559b64ccd96ae4ad7443d3df1442d5e3c59032edc32` |
+| **`dist/whatsapp-manutencao-windows-x64.zip`** | Pacote ZIP de distribuição (Executável + Documentação) | 48.752.765 | `981835484f1cca6cae6ad288b8959ce4b5de036e20e4b0c203050f6159db6059` |
+| **`payload.zip` (embutido)** | Payload interno extraído pelo launcher (Node runtime + app + libs) | 48.828.817 | `4b2477226f2938bd6654019d92a0e6833e283d00478619c901fb7401b04f14af` |
 | **`launcher-base`** | Stub PE x64 compilado em Go | 3.722.752 | Extraído e verificado antes da anexação do trailer |
 | **`cloudflared-windows-amd64.exe`** | Binário oficial Cloudflare (versão 2026.9.1) | ~34 MB | `2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712` |
 
