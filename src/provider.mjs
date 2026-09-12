@@ -36,7 +36,7 @@ export class WhatsAppProvider {
       const sessionDir = path.join(dataPath, 'session-maintenance');
       if (process.platform === 'win32') {
         try {
-          powershell(`$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | Where-Object { $_.CommandLine -like "*WhatsAppManutencaoSegura*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
+          powershell(`$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | Where-Object { \\$_.CommandLine -like "*WhatsAppManutencaoSegura*" } | ForEach-Object { Stop-Process -Id \\$_.ProcessId -Force }`);
         } catch {}
       }
       for (const f of ['lockfile', 'DevToolsActivePort']) {
@@ -52,6 +52,15 @@ export class WhatsAppProvider {
         webVersionCache: { type: 'none' },
         qrMaxRetries: 5, takeoverOnConflict: false
       });
+      const origInject = this.client.inject.bind(this.client);
+      this.client.inject = async () => {
+        try {
+          return await origInject();
+        } catch (e) {
+          if (this.closed || e?.name === 'TargetCloseError' || e?.message?.includes('Target closed') || e?.message?.includes('Protocol error')) return;
+          throw e;
+        }
+      };
       this.client.on('qr', qr => {
         if (this.closed) { void this.client.destroy().catch(() => {}); return; }
         this.state = 'pairing_required';
