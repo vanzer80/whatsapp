@@ -25,6 +25,25 @@ try {
   const tunnel = await startCloudflareTunnel({ localPort: port });
   console.log(`✓ Túnel conectado com sucesso: ${tunnel.url}`);
 
+  // Comunica a URL pública validada ao serviço local
+  try {
+    const notifyRes = await fetch(`${discovery.origin}/api/tunnel`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${discovery.ui_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ url: tunnel.url })
+    });
+    if (!notifyRes.ok) {
+      console.warn('Aviso: O serviço local recusou a atualização da URL pública.');
+    } else {
+      console.log('✓ URL pública sincronizada com sucesso no serviço local.');
+    }
+  } catch (err) {
+    console.warn('Aviso: Falha ao sincronizar URL pública com o serviço local:', err.message);
+  }
+
   console.log('\n' + '='.repeat(70));
   console.log('CONFIGURAÇÃO DO CUSTOM GPT NO CHATGPT (Celular e Navegador)');
   console.log('='.repeat(70));

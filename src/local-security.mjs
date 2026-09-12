@@ -17,9 +17,14 @@ export function minimalEnvironment(source = process.env) {
 }
 
 export function powershell(command, extraEnv = {}) {
-  const binary = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+  const binary = path.join(sysRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const safeEnv = minimalEnvironment();
+  if (process.platform === 'win32') {
+    safeEnv.PATH = `${sysRoot}\\System32;${sysRoot};${sysRoot}\\System32\\WindowsPowerShell\\v1.0`;
+  }
   return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
-    env: { ...minimalEnvironment(), ...extraEnv }, encoding: 'utf8', timeout: 30000,
+    env: { ...safeEnv, ...extraEnv }, encoding: 'utf8', timeout: 30000,
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024
   });
 }
@@ -40,7 +45,7 @@ export function secureDirectory(directory = dataDirectory()) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (!lstatSync(directory).isDirectory()) throw new Error('Pasta local inválida.');
   const resolved = path.resolve(directory);
-  if (securedDirs.has(resolved)) return;
+  if (securedDirs.has(resolved)) return directory;
   if (process.platform === 'win32') {
     // Fixed script; the path travels as an environment value, never PowerShell source.
     powershell(`$ErrorActionPreference='Stop';
@@ -66,8 +71,8 @@ export function secureDirectory(directory = dataDirectory()) {
       $dir.SetAccessControl($acl);
       $check=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
       if (!$check.AreAccessRulesProtected) { throw 'ACL not protected'; }
-      foreach ($rule in $check.Access) {
-        $sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;
+      foreach ($rule in $check.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier])) {
+        $sid=$rule.IdentityReference.Value;
         if ($sid -ne $me.Value -and $sid -ne 'S-1-5-18' -and $sid -ne $adminSid) { throw 'Unexpected access rule'; }
       }`, { WA_SECURE_DIRECTORY: directory });
   } else {

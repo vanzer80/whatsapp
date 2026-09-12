@@ -122,6 +122,8 @@ def collect_payload_files(node_exe: Path) -> list[tuple[Path | bytes, str]]:
                 "desktop-service.mjs",
                 "desktop-stdio.mjs",
                 "open-desktop.mjs",
+                "start-gpt-tunnel.mjs",
+                "stdio.mjs",
             }:
                 continue
             items.append((file, "whatsapp-manutencao/" + file.relative_to(ROOT).as_posix()))

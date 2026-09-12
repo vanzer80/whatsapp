@@ -9,7 +9,7 @@ import { DesktopController } from './desktop-controller.mjs';
 import { registerLocal, registrationStatus } from './desktop-registration.mjs';
 import { dataDirectory, secureDirectory, writePrivateJson } from './local-security.mjs';
 import { createGptHandler } from './gpt-handler.mjs';
-import { getOrCreateGptToken } from './gpt-tunnel.mjs';
+import { getOrCreateGptToken, CloudflareTunnelManager } from './gpt-tunnel.mjs';
 
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 export class PipeTransport {
@@ -53,7 +53,7 @@ async function body(request) {
   if(!result||Array.isArray(result)||typeof result!=='object')throw new Error('Solicitação inválida.');
   return result;
 }
-export function createWebHandler(controller,connection,register=()=>{},gptHandler=null) {
+export function createWebHandler(controller,connection,register=()=>{},gptHandler=null,tunnelManager=null) {
   return async(request,response)=>{
     const {origin,uiToken}=connection;
     let pathname,parsedUrl;
@@ -88,14 +88,18 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
           registered:connection.registered,
           last_mcp_seen:connection.lastMcpSeen,
           gpt_token:connection.gptToken,
-          public_url:connection.publicUrl
+          public_url:connection.publicUrl,
+          tunnel_active:Boolean(connection.publicUrl),
+          external_query_confirmed:Boolean(connection.externalQueryConfirmed),
+          capabilities:connection.capabilities,
+          build_id:connection.build_id
         });
         return;
       }
       if(request.method==='GET'&&pathname==='/api/chats') {send(response,200,{chats:controller.phase==='choose'?controller.choices:[]});return;}
       if(request.method!=='POST'){send(response,404,{error:'Ação não encontrada.'});return;}
       const input=await body(request);
-      if(pathname!=='/api/authorize'&&Object.keys(input).length)throw new Error('Solicitação inválida.');
+      if(!['/api/authorize','/api/tunnel'].includes(pathname)&&Object.keys(input).length)throw new Error('Solicitação inválida.');
       if(pathname==='/api/setup') {register();connection.registered=true;await controller.connect();}
       else if(pathname==='/api/connect')await controller.connect();
       else if(pathname==='/api/edit')await controller.edit();
@@ -104,10 +108,34 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
         await controller.authorize(input.chat_ids);
       }
       else if(pathname==='/api/block')await controller.block();
+      else if(pathname==='/api/disconnect')await controller.disconnect();
+      else if(pathname==='/api/switch-account')await controller.switchAccount();
+      else if(pathname==='/api/tunnel/start') {
+        if(!tunnelManager)throw new Error('Gerenciador de túnel indisponível.');
+        const port=new URL(origin).port;
+        const res=await tunnelManager.start({localPort:port});
+        connection.publicUrl=res.url;
+        send(response,200,{ok:true,url:res.url});
+        return;
+      }
+      else if(pathname==='/api/tunnel/stop') {
+        if(tunnelManager)tunnelManager.stop();
+        connection.publicUrl=null;
+        send(response,200,{ok:true});
+        return;
+      }
+      else if(pathname==='/api/tunnel') {
+        if(typeof input.url!=='string'||!/^https:\/\/[a-zA-Z0-9-.]+\.[a-zA-Z]{2,}(?::\d+)?$/.test(input.url)) {
+          throw new Error('URL de túnel HTTPS válida é obrigatória.');
+        }
+        connection.publicUrl=input.url;
+        send(response,200,{ok:true,url:input.url});
+        return;
+      }
       else {send(response,404,{error:'Ação não encontrada.'});return;}
       send(response,200,{ok:true});
     } catch(error) {
-      const allowed=/^(Selecione|Conecte|Aguarde|A seleção|Uma conversa|A conexão mudou|Já existe uma conexão|A configuração|O registro|Caminho do aplicativo)/;
+      const allowed=/^(Selecione|Conecte|Aguarde|A seleção|Uma conversa|A conexão mudou|Já existe uma conexão|A configuração|O registro|Caminho do aplicativo|URL de túnel|O túnel)/;
       send(response,400,{error:allowed.test(error.message)?error.message:'Não foi possível concluir esta etapa. Tente novamente pelo aplicativo.'});
     }
   };
@@ -118,11 +146,27 @@ export async function startDesktopService({controller=new DesktopController(),di
   secureDirectory(directory);
   const uiToken=randomBytes(32).toString('hex'),ipcToken=randomBytes(32).toString('hex'),gptToken=getOrCreateGptToken(directory);
   const pipe=process.platform==='win32'?`\\\\.\\pipe\\WhatsAppManutencao-${randomUUID()}`:path.join(directory,`ipc-${randomUUID().slice(0,12)}.sock`);
-  const connection={uiToken,ipcToken,gptToken,registered:isRegistered(),lastMcpSeen:null,origin:null,publicUrl:tunnelUrl};
+  const connection={
+    uiToken,
+    ipcToken,
+    gptToken,
+    registered:isRegistered(),
+    lastMcpSeen:null,
+    origin:null,
+    publicUrl:tunnelUrl,
+    externalQueryConfirmed:false,
+    capabilities:['mcp_reader','gpt_actions'],
+    build_id:'0.3.0-r2'
+  };
+  const tunnelManager=new CloudflareTunnelManager({directory});
+  tunnelManager.onUrlChange=url=>{connection.publicUrl=url;};
+  tunnelManager.onClose=()=>{connection.publicUrl=null;};
+
   const gptHandler=createGptHandler({
     getReader:()=>controller.reader,
     getGptToken:()=>connection.gptToken,
-    getPublicUrl:()=>connection.publicUrl||connection.origin
+    getPublicUrl:()=>connection.publicUrl||null,
+    onExternalQuery:()=>{connection.externalQueryConfirmed=true;}
   });
   const connections=new Set();let closed=false,origin;
   const pipeServer=net.createServer(socket=>{
@@ -132,7 +176,7 @@ export async function startDesktopService({controller=new DesktopController(),di
     server.connect(new PipeTransport(socket,ipcToken)).catch(()=>socket.destroy());
   });
   pipeServer.maxConnections=20;
-  const web=http.createServer(createWebHandler(controller,connection,register,gptHandler));
+  const web=http.createServer(createWebHandler(controller,connection,register,gptHandler,tunnelManager));
   web.maxConnections=50;web.maxHeadersCount=30;web.requestTimeout=10000;web.headersTimeout=10000;web.keepAliveTimeout=5000;
   const discoveryFile=path.join(directory,'desktop-service.json');
   let discovery;
@@ -141,7 +185,18 @@ export async function startDesktopService({controller=new DesktopController(),di
     if(process.platform!=='win32')chmodSync(pipe,0o600);
     await new Promise((resolve,reject)=>{web.once('error',reject);web.listen(0,'127.0.0.1',resolve);});
     origin=`http://127.0.0.1:${web.address().port}`;connection.origin=origin;
-    discovery={version:'0.3.0',pid:process.pid,origin,ui_token:uiToken,ipc_token:ipcToken,gpt_token:gptToken,pipe,executable};
+    discovery={
+      version:'0.3.0',
+      build_id:connection.build_id,
+      capabilities:connection.capabilities,
+      pid:process.pid,
+      origin,
+      ui_token:uiToken,
+      ipc_token:ipcToken,
+      gpt_token:gptToken,
+      pipe,
+      executable
+    };
     if(writeDiscovery)writePrivateJson(discoveryFile,discovery);
   } catch(error) {
     for(const socket of connections)socket.destroy();
@@ -153,11 +208,19 @@ export async function startDesktopService({controller=new DesktopController(),di
     if(controller.phase==='ready' && (!controller.provider?.status().connected || !controller.access.snapshot(controller.provider?.accountId())))
       void controller.block().catch(()=>controller.close());
   },1500);monitor.unref();
-  return {discovery,controller,async close(){
-    if(closed)return;closed=true;clearInterval(monitor);await controller.close();
-    for(const socket of connections)socket.destroy();
-    await Promise.all([new Promise(resolve=>pipeServer.close(resolve)),new Promise(resolve=>{web.closeAllConnections();web.close(resolve);})]);
-    if(writeDiscovery&&existsSync(discoveryFile))unlinkSync(discoveryFile);
-    if(process.platform!=='win32'&&existsSync(pipe))unlinkSync(pipe);
-  }};
+  return {
+    discovery,
+    controller,
+    tunnelManager,
+    connection,
+    async close(){
+      if(closed)return;closed=true;clearInterval(monitor);
+      tunnelManager.stop();
+      await controller.close();
+      for(const socket of connections)socket.destroy();
+      await Promise.all([new Promise(resolve=>pipeServer.close(resolve)),new Promise(resolve=>{web.closeAllConnections();web.close(resolve);})]);
+      if(writeDiscovery&&existsSync(discoveryFile))unlinkSync(discoveryFile);
+      if(process.platform!=='win32'&&existsSync(pipe))unlinkSync(pipe);
+    }
+  };
 }

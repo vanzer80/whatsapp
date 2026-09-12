@@ -1,9 +1,16 @@
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, unlinkSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { ReadError } from './core.mjs';
 import { dataDirectory, noLinks, powershell, secureDirectory } from './local-security.mjs';
 
 export { dataDirectory } from './local-security.mjs';
+export function clearSessionMaintenance(directory = dataDirectory()) {
+  const sessionDir = path.join(directory, 'session-maintenance');
+  if (existsSync(sessionDir)) {
+    noLinks(sessionDir);
+    rmSync(sessionDir, { recursive: true, force: true });
+  }
+}
 export function chromePath(env = process.env) {
   const candidates = [
     env.PROGRAMFILES && path.join(env.PROGRAMFILES, 'Google/Chrome/Application/chrome.exe'),

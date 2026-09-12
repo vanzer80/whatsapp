@@ -21,12 +21,23 @@ export function readDiscovery() {
 }
 export async function running() {
   const d=readDiscovery();if(!d)return null;
-  try {const r=await fetch(d.origin+'/api/status',{headers:{Authorization:`Bearer ${d.ui_token}`},redirect:'error',signal:AbortSignal.timeout(1500)});
-    if(!r.ok)return null;const state=await r.json();return state.version==='0.3.0'?d:null;
+  try {
+    const r=await fetch(d.origin+'/api/status',{headers:{Authorization:`Bearer ${d.ui_token}`},redirect:'error',signal:AbortSignal.timeout(1500)});
+    if(!r.ok)return null;
+    const state=await r.json();
+    if(state.version!=='0.3.0')return null;
+    if(!Array.isArray(state.capabilities)||!state.capabilities.includes('gpt_actions'))return null;
+    return d;
   }catch{return null;}
 }
 export async function ensureRunning() {
-  secureDirectory();const existing=await running();if(existing)return existing;
+  secureDirectory();
+  const existing=await running();
+  if(existing)return existing;
+  const oldDisc=readDiscovery();
+  if(oldDisc?.pid) {
+    try { process.kill(oldDisc.pid); } catch {}
+  }
   const env=minimalEnvironment();
   if (process.platform === 'win32') {
     const sysRoot=env.SystemRoot||env.WINDIR||'C:\\Windows';

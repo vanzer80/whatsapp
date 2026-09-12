@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { MAX_RESPONSE_BYTES } from './core.mjs';
+import { MAX_RESPONSE_BYTES, ReadError } from './core.mjs';
 
 function equal(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -46,7 +46,7 @@ async function parseBody(request, limit = 16384) {
   }
 }
 
-export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
+export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
   return {
     openapi: '3.1.0',
     info: {
@@ -123,7 +123,7 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
           type: 'object',
           properties: {
             chat_id: { type: 'string', description: 'Identificador da conversa autorizada para ler mensagens.' },
-            limit: { type: 'integer', minimum: 1, maximum: 50, default: 20, description: 'Quantidade de mensagens mais recentes (máx 50).' },
+            limit: { type: 'integer', minimum: 1, maximum: 30, default: 20, description: 'Quantidade de mensagens mais recentes (máx 30).' },
             since: { type: 'string', format: 'date-time', description: 'Filtrar mensagens a partir desta data/hora UTC (inclusive).' },
             before: { type: 'string', format: 'date-time', description: 'Filtrar mensagens anteriores a esta data/hora UTC (exclusive).' }
           },
@@ -136,7 +136,8 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
             timestamp: { type: 'string', format: 'date-time', description: 'Data/hora de envio.' },
             author: { type: 'string', description: 'Pseudônimo ou nome do autor (nunca expõe número de telefone).' },
             text: { type: 'string', description: 'Conteúdo textual da mensagem.' },
-            truncated: { type: 'boolean', description: 'Indica se o texto foi cortado por limite de tamanho.' }
+            truncated: { type: 'boolean', description: 'Indica se o texto foi cortado por limite de tamanho.' },
+            text_truncated: { type: 'boolean', description: 'Alias para conformidade com o formato do leitor.' }
           },
           required: ['message_id', 'timestamp', 'author', 'text']
         },
@@ -164,7 +165,7 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
               items: { type: 'string' },
               description: 'Opcional: restringir busca a IDs específicos de conversas autorizadas.'
             },
-            limit: { type: 'integer', minimum: 1, maximum: 50, default: 20, description: 'Limite de resultados.' }
+            limit: { type: 'integer', minimum: 1, maximum: 30, default: 20, description: 'Limite de resultados.' }
           },
           required: ['query']
         },
@@ -176,9 +177,22 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
             timestamp: { type: 'string', format: 'date-time', description: 'Data/hora da mensagem.' },
             author: { type: 'string', description: 'Pseudônimo ou nome do autor.' },
             text: { type: 'string', description: 'Conteúdo textual da mensagem correspondente.' },
-            truncated: { type: 'boolean', description: 'Indica se o texto foi cortado.' }
+            truncated: { type: 'boolean', description: 'Indica se o texto foi cortado.' },
+            text_truncated: { type: 'boolean', description: 'Indica se o texto foi cortado.' }
           },
           required: ['chat_id', 'message_id', 'timestamp', 'author', 'text']
+        },
+        CoverageItem: {
+          type: 'object',
+          properties: {
+            chat_id: { type: 'string', description: 'Identificador da conversa examinada.' },
+            scanned_count: { type: 'integer', description: 'Total de mensagens examinadas nesta conversa.' },
+            requested_scan_limit: { type: 'integer', description: 'Limite de varredura configurado.' },
+            oldest_scanned: { type: 'string', format: 'date-time', nullable: true, description: 'Data da mensagem mais antiga examinada.' },
+            newest_scanned: { type: 'string', format: 'date-time', nullable: true, description: 'Data da mensagem mais recente examinada.' },
+            complete_history: { type: 'boolean', description: 'Indica se todo o histórico foi coberto.' }
+          },
+          required: ['chat_id', 'scanned_count', 'complete_history']
         },
         SearchMessagesResponse: {
           type: 'object',
@@ -190,8 +204,12 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
               description: 'Mensagens encontradas correspondentes à busca.'
             },
             total_matching: { type: 'integer', description: 'Total de mensagens correspondentes encontradas.' },
-            coverage: { type: 'string', description: 'Descrição da cobertura da busca.' },
-            disclaimer: { type: 'string', description: 'Aviso de segurança.' }
+            coverage: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/CoverageItem' },
+              description: 'Lista detalhada de conversas e janelas examinadas.'
+            },
+            disclaimer: { type: 'string', description: 'Aviso de segurança sobre os resultados.' }
           },
           required: ['query', 'results', 'total_matching']
         }
@@ -240,8 +258,8 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
               name: 'limit',
               in: 'query',
               required: false,
-              schema: { type: 'integer', minimum: 1, maximum: 50, default: 30 },
-              description: 'Limite de conversas por página.'
+              schema: { type: 'integer', minimum: 1, maximum: 30, default: 30 },
+              description: 'Limite de conversas por página (máx 30).'
             },
             {
               name: 'offset',
@@ -357,6 +375,14 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
                   schema: { $ref: '#/components/schemas/ErrorResponse' }
                 }
               }
+            },
+            '403': {
+              description: 'Acesso negado: conversa não autorizada informada.',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' }
+                }
+              }
             }
           }
         }
@@ -365,7 +391,7 @@ export function buildOpenApiSpec(baseUrl = 'http://127.0.0.1:59406') {
   };
 }
 
-export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 'http://127.0.0.1' }) {
+export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => null, onExternalQuery = () => {} }) {
   return async (request, response, parsedUrl) => {
     // 1. CORS Preflight
     if (request.method === 'OPTIONS') {
@@ -382,9 +408,9 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
 
     const pathname = parsedUrl.pathname;
 
-    // 2. Servir OpenAPI Schema (pode ser público para o ChatGPT ler ao configurar a Action)
+    // 2. Servir OpenAPI Schema (público para importação pelo ChatGPT Actions)
     if (pathname === '/gpt/openapi.json' && request.method === 'GET') {
-      const publicBase = getPublicUrl() || `http://${request.headers.host}`;
+      const publicBase = getPublicUrl() || 'https://desconectado.whatsapp-manutencao.local';
       sendJson(response, 200, buildOpenApiSpec(publicBase));
       return true;
     }
@@ -392,7 +418,7 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
     // 3. Validação de Autenticação Bearer Token
     const expectedToken = getGptToken();
     if (!expectedToken) {
-      sendJson(response, 503, { error: 'O acesso remoto para Custom GPT ainda não foi configurado.' });
+      sendJson(response, 503, { error: 'O acesso remoto para Custom GPT ainda não foi configurado.', code: 'SERVICE_UNAVAILABLE' });
       return true;
     }
 
@@ -416,6 +442,7 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
     try {
       if (pathname === '/gpt/status' && request.method === 'GET') {
         const result = await reader.execute('get_status', {});
+        onExternalQuery();
         sendJson(response, 200, result);
         return true;
       }
@@ -426,9 +453,10 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
         const offsetStr = parsedUrl.searchParams.get('offset');
         const limit = limitStr ? parseInt(limitStr, 10) : 30;
         const offset = offsetStr ? parseInt(offsetStr, 10) : 0;
-        const args = { limit: Math.min(Math.max(limit, 1), 50), offset: Math.max(offset, 0) };
+        const args = { limit: Math.min(Math.max(limit, 1), 30), offset: Math.max(offset, 0) };
         if (query) args.query = query;
         const result = await reader.execute('list_chats', args);
+        onExternalQuery();
         sendJson(response, 200, result);
         return true;
       }
@@ -441,12 +469,34 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
         }
         const args = {
           chat_id: input.chat_id,
-          limit: typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 50) : 20
+          limit: typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 30) : 20
         };
         if (input.since) args.since = input.since;
         if (input.before) args.before = input.before;
         const result = await reader.execute('read_messages', args);
-        sendJson(response, 200, { chat_id: input.chat_id, ...result });
+        onExternalQuery();
+
+        const messages = (result.messages || []).map(m => ({
+          ...m,
+          truncated: Boolean(m.text_truncated)
+        }));
+
+        let responseData = {
+          chat_id: input.chat_id,
+          messages,
+          retrieved_count: messages.length,
+          has_more: Boolean(result.result_truncated),
+          disclaimer: result.note || 'Janela recente e limitada nas conversas autorizadas.'
+        };
+
+        // Validação estrita do teto de bytes de resposta
+        while (Buffer.byteLength(JSON.stringify(responseData), 'utf8') > MAX_RESPONSE_BYTES && responseData.messages.length) {
+          responseData.messages.shift();
+          responseData.has_more = true;
+          responseData.retrieved_count = responseData.messages.length;
+        }
+
+        sendJson(response, 200, responseData);
         return true;
       }
 
@@ -456,24 +506,62 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
           sendJson(response, 400, { error: 'O campo query é obrigatório e deve conter pelo menos 2 caracteres.', code: 'INVALID_ARGUMENT' });
           return true;
         }
-        const args = {
-          query: input.query.trim(),
-          limit: typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 50) : 20
-        };
-        if (Array.isArray(input.chat_ids) && input.chat_ids.length > 0) {
-          args.chat_ids = input.chat_ids.filter(id => typeof id === 'string').slice(0, 3);
-        } else {
-          const policy = reader.access.snapshot(reader.provider.accountId());
-          if (policy?.allowed_chat_ids && policy.allowed_chat_ids.length > 0) {
-            args.chat_ids = policy.allowed_chat_ids.slice(0, 3);
-          }
+
+        const policy = reader.access.snapshot(reader.provider.accountId());
+        if (!policy || !policy.allowed_chat_ids?.length) {
+          throw new ReadError('ACCESS_NOT_CONFIGURED', 'Nenhuma conversa autorizada para esta conta.');
         }
-        const result = await reader.execute('search_messages', args);
-        sendJson(response, 200, {
-          query: input.query,
-          results: result.messages,
-          ...result
-        });
+
+        let targetChatIds;
+        if (Array.isArray(input.chat_ids) && input.chat_ids.length > 0) {
+          const invalid = input.chat_ids.find(id => typeof id !== 'string' || !policy.allowed_chat_ids.includes(id));
+          if (invalid) {
+            throw new ReadError('CHAT_NOT_ALLOWED', `Conversa fora da lista local de acesso: ${invalid}`);
+          }
+          targetChatIds = [...new Set(input.chat_ids)];
+        } else {
+          targetChatIds = [...policy.allowed_chat_ids];
+        }
+
+        const requestedLimit = typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 30) : 20;
+        const allMessages = [];
+        const aggregatedCoverage = [];
+
+        // Busca em lotes de até 3 conversas sem descarte silencioso
+        for (let i = 0; i < targetChatIds.length; i += 3) {
+          const chunk = targetChatIds.slice(i, i + 3);
+          const chunkResult = await reader.execute('search_messages', {
+            query: input.query.trim(),
+            chat_ids: chunk,
+            limit: requestedLimit
+          });
+          if (chunkResult.messages) allMessages.push(...chunkResult.messages);
+          if (chunkResult.coverage) aggregatedCoverage.push(...chunkResult.coverage);
+        }
+
+        onExternalQuery();
+
+        allMessages.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.message_id.localeCompare(b.message_id));
+        const finalResults = allMessages.slice(-requestedLimit).map(m => ({
+          ...m,
+          truncated: Boolean(m.text_truncated)
+        }));
+
+        let responseData = {
+          query: input.query.trim(),
+          results: finalResults,
+          total_matching: allMessages.length,
+          coverage: aggregatedCoverage,
+          disclaimer: 'Janela recente e limitada nas conversas autorizadas.'
+        };
+
+        // Validação estrita do teto de bytes (sem duplicação de mensagens)
+        while (Buffer.byteLength(JSON.stringify(responseData), 'utf8') > MAX_RESPONSE_BYTES && responseData.results.length) {
+          responseData.results.shift();
+          responseData.total_matching = responseData.results.length;
+        }
+
+        sendJson(response, 200, responseData);
         return true;
       }
 
@@ -482,9 +570,23 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
     } catch (err) {
       const isForbidden = err.code === 'ACCESS_NOT_CONFIGURED' || err.code === 'FORBIDDEN' || err.code === 'CHAT_NOT_ALLOWED';
       const isRateLimit = err.code === 'RATE_LIMITED' || err.code === 'BUSY';
-      const status = isForbidden ? 403 : isRateLimit ? 429 : 400;
+      const isNotConnected = err.code === 'NOT_CONNECTED';
+      const status = isForbidden ? 403 : isRateLimit ? 429 : isNotConnected ? 503 : 400;
+
+      // Sanitização de erros para não expor caminhos de arquivo, variáveis de ambiente ou detalhes de bibliotecas
+      const isBadInput = err.code === 'INVALID_ARGUMENTS' || err.code === 'INVALID_ARGUMENT' || err.code === 'INVALID_RANGE' || /excede o limite|JSON|conteúdo|obrigatório/.test(err.message || '');
+      const safeError = isForbidden
+        ? (err.message || 'Conversa não autorizada.')
+        : isRateLimit
+        ? 'Aguarde alguns instantes antes da próxima consulta.'
+        : isNotConnected
+        ? 'O WhatsApp não está conectado no aplicativo local.'
+        : isBadInput
+        ? (err.message || 'Parâmetros de consulta inválidos.')
+        : 'Falha ao processar consulta.';
+
       sendJson(response, status, {
-        error: err.message || 'Falha ao processar consulta.',
+        error: safeError,
         code: err.code || 'ERROR'
       });
       return true;

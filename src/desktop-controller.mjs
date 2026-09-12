@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { Reader } from './core.mjs';
 import { AccessStore, savePolicy, validChatId } from './access.mjs';
 import { writePrivateJson } from './local-security.mjs';
-import { WhatsAppProvider, chromePath } from './provider.mjs';
+import { WhatsAppProvider, chromePath, clearSessionMaintenance } from './provider.mjs';
 
 const require=createRequire(import.meta.url);
 const QRCode=require('qrcode-terminal/vendor/QRCode');
@@ -101,6 +101,24 @@ export class DesktopController {
       if(generation!==this.generation || provider!==this.provider || account!==provider.accountId() || !provider.status().connected)throw new Error('A conexão mudou. Selecione novamente.');
       savePolicy(account,ids,this.access.file);this.choices=[];this.phase='ready';
     } finally {this.changing=false;}
+  }
+  async disconnect() {
+    ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    const provider=this.provider;this.provider=null;
+    try {this.revoke();}
+    finally {if(provider)await provider.close();}
+  }
+  async switchAccount() {
+    if(this.changing)throw new Error('Aguarde a operação atual.');
+    this.changing=true;
+    ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    const provider=this.provider;this.provider=null;
+    try {
+      this.revoke();
+      if(provider)await provider.close();
+      clearSessionMaintenance();
+    } finally {this.changing=false;}
+    await this.connect({interactive:true});
   }
   async block() {
     ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='blocked';

@@ -16,6 +16,7 @@ import (
  "regexp"
  "strconv"
  "strings"
+ "time"
 )
 
 var payloadSHA string
@@ -109,20 +110,32 @@ func verifyInstall(archive *zip.Reader,target string) error {
  })
 }
 func install(self *os.File,archive *zip.Reader) (string,error) {
- base,err:=applicationBase();if err!=nil{return "",err}
- if err=noLinks(base);err!=nil{return "",err};if err=os.MkdirAll(base,0700);err!=nil{return "",err}
- if err=secureFolder(base);err!=nil{return "",err}
- target:=filepath.Join(base,version)
- if _,err=os.Stat(target);err==nil {return target,verifyInstall(archive,target)} else if !os.IsNotExist(err){return "",err}
- stage,err:=os.MkdirTemp(base,"install-");if err!=nil{return "",err};defer os.RemoveAll(stage)
- if err=secureFolder(stage);err!=nil{return "",err}
- if err=extractArchive(archive,stage);err!=nil{return "",err}
- if _,err=self.Seek(0,io.SeekStart);err!=nil{return "",err}
- out,err:=os.OpenFile(filepath.Join(stage,executableName),os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if err!=nil{return "",err}
- _,copyErr:=io.Copy(out,self);closeErr:=out.Close();if copyErr!=nil{return "",copyErr};if closeErr!=nil{return "",closeErr}
- if err=verifyInstall(archive,stage);err!=nil{return "",err}
- if err=os.Rename(stage,target);err!=nil{return "",err}
- return target,nil
+	base,err:=applicationBase();if err!=nil{return "",err}
+	if err=noLinks(base);err!=nil{return "",err};if err=os.MkdirAll(base,0700);err!=nil{return "",err}
+	if err=secureFolder(base);err!=nil{return "",err}
+	target:=filepath.Join(base,version)
+	if _,err=os.Stat(target);err==nil {
+		if verifyErr:=verifyInstall(archive,target); verifyErr==nil {
+			return target,nil
+		}
+	} else if !os.IsNotExist(err){return "",err}
+	stage,err:=os.MkdirTemp(base,"install-");if err!=nil{return "",err};defer os.RemoveAll(stage)
+	if err=secureFolder(stage);err!=nil{return "",err}
+	if err=extractArchive(archive,stage);err!=nil{return "",err}
+	if _,err=self.Seek(0,io.SeekStart);err!=nil{return "",err}
+	out,err:=os.OpenFile(filepath.Join(stage,executableName),os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if err!=nil{return "",err}
+	_,copyErr:=io.Copy(out,self);closeErr:=out.Close();if copyErr!=nil{return "",copyErr};if closeErr!=nil{return "",closeErr}
+	if err=verifyInstall(archive,stage);err!=nil{return "",err}
+	if _,err=os.Stat(target);err==nil {
+		oldBackup:=filepath.Join(base,"old-"+version+"-"+strconv.FormatInt(time.Now().UnixNano(),10))
+		if renameErr:=os.Rename(target,oldBackup);renameErr==nil {
+			defer os.RemoveAll(oldBackup)
+		} else {
+			_ = os.RemoveAll(target)
+		}
+	}
+	if err=os.Rename(stage,target);err!=nil{return "",err}
+	return target,nil
 }
 func main() {
  mcp:=len(os.Args)==2&&os.Args[1]=="--mcp"

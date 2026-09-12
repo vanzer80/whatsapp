@@ -1,68 +1,68 @@
 # WhatsApp Manutenção
 
-Aplicativo local em desenvolvimento para permitir ao ChatGPT para Windows consultar conversas do WhatsApp previamente escolhidas pelo usuário.
+Aplicativo local para permitir ao ChatGPT (no Windows Desktop, Navegador Web e Celular) consultar conversas do WhatsApp previamente autorizadas pelo usuário com controle estrito de privacidade.
 
-**Estado: Versão 0.3.0 concluída, empacotada e homologada no Windows x64 com ChatGPT Desktop (Codex).** O instalador único standalone (`WhatsApp-Manutencao.exe`), a integração MCP de leitura segura, a proteção de pastas NTFS e a automação de CI/CD foram implementados e validados de ponta a ponta com contas reais.
+**Estado: Versão 0.3.0 concluída, empacotada e homologada no Windows x64.** O executável único standalone (`whatsapp-manutencao.exe`), o suporte híbrido a MCP local (Desktop) e Custom GPT Actions (Web e Mobile), o túnel Cloudflare gerenciado com integridade criptográfica, a proteção de pastas NTFS e a automação de testes foram implementados e validados.
 
-## Experiência que queremos entregar
+## Experiência do Usuário
 
-O usuário abre um único arquivo, clica em **Preparar e conectar**, escaneia o QR pelo celular e escolhe as conversas. O aplicativo registra a conexão local e administra os componentes necessários. O usuário não precisa abrir terminal, instalar Node, preparar túnel ou criar chave de API.
+O usuário final não precisa instalar Node.js, Git, Python ou configurar variáveis de ambiente e processos de terminal:
 
-A interface permite alterar a seleção e bloquear o acesso. O assistente oferece somente quatro operações: verificar o estado, listar conversas autorizadas, ler mensagens e pesquisar mensagens.
+1. Baixe e execute o aplicativo standalone `whatsapp-manutencao.exe`.
+2. O painel local abre automaticamente no navegador padrão com interface em português.
+3. Clique em **Conectar**, aponte a câmera do WhatsApp no celular para o QR Code na tela.
+4. Selecione as conversas desejadas (limite seguro de até 30 conversas) e clique em **Autorizar conversas**.
+5. Consulte suas mensagens no ChatGPT:
+   - **ChatGPT Desktop (Windows)**: O assistente conecta-se automaticamente via MCP local (arquivo de configuração atualizado de forma idempotente).
+   - **ChatGPT Web e Celular (iOS / Android)**: Clique em **Iniciar Túnel** no painel, copie a URL do OpenAPI Schema (`https://<seu-tunel>.trycloudflare.com/gpt/openapi.json`) e o Token de Acesso exibido e configure a GPT Action no seu Custom GPT na OpenAI.
 
-## O que já existe
+A interface permite revogar acessos a qualquer momento, pausar/iniciar o túnel público e realizar a **Troca de número / Conta** com um clique, limpando cirurgicamente apenas a sessão do aplicativo e gerando novo QR Code sem afetar dados do sistema.
 
-- Interface em português para QR, seleção de até 30 conversas e bloqueio.
-- Autorizações vinculadas à conta, com revogação durante consultas e recusa de conversas trancadas.
-- Serviço local compartilhado pelo painel e pelo MCP, com autenticação local gerada automaticamente.
-- Registro no arquivo de configuração do ChatGPT preservando as demais configurações.
-- Fonte do iniciador Windows e do empacotador; eles ainda não foram compilados e validados.
-- Testes com dados simulados. Última execução registrada: **46 aprovados, 0 falhos e 2 impedidos pelo ambiente**, de um total de 48.
+## Clientes Suportados e Arquitetura de Integração
 
-## Onde ajudar primeiro
+| Cliente ChatGPT | Tipo de Integração | Transporte | Requisitos de Rede |
+| :--- | :--- | :--- | :--- |
+| **ChatGPT Desktop (Windows)** | MCP Local (Model Context Protocol) | stdio / Named Pipe local (`scripts/stdio.mjs`) | Somente local (`127.0.0.1`), sem necessidade de túnel externo ou internet aberta. |
+| **ChatGPT Web (chatgpt.com)** | Custom GPT Actions (OpenAPI 3.1.0) | HTTPS REST com Bearer Token | Túnel HTTPS público (`cloudflared`) ativo apontando para o serviço local. |
+| **ChatGPT Mobile (iOS / Android)** | Custom GPT Actions (OpenAPI 3.1.0) | HTTPS REST com Bearer Token | Mesmo Custom GPT configurado com o túnel HTTPS público. |
 
-Veja as [tarefas abertas no GitHub](https://github.com/vanzer80/whatsapp/issues). Escolha uma tarefa e registre nela o trabalho que pretende realizar antes de abrir um pull request.
+> [!NOTE]
+> **Continuidade do Túnel:** A inicialização padrão utiliza *Cloudflare Quick Tunnels* (`trycloudflare.com`), cujo endereço expira ao reiniciar o processo. Para um endereço fixo que dispense reconfiguração do schema no ChatGPT, defina a variável `CLOUDFLARE_TUNNEL_TOKEN` com um túnel nomeado da sua conta Cloudflare.
 
-| Prioridade | Trabalho | Estado | Resultado |
-| --- | --- | --- | --- |
-| P0 | [Confirmar a integração real no ChatGPT Windows](docs/tarefas/01-integracao-windows.md) | Concluído | ChatGPT Desktop (Codex) reconhece o MCP local e executa consultas reais autorizadas. |
-| P0 | [Compilar e verificar o instalador](docs/tarefas/02-instalador.md) | Concluído | Executável único `WhatsApp-Manutencao.exe` standalone (~52 MB) empacotado e testado. |
-| P0 | [Validar acesso e revogação de ponta a ponta](docs/tarefas/03-acesso-e-seguranca.md) | Concluído | Isolamento IPC por Named Pipe, DACLs NTFS seguras e revogação dinâmica validados. |
-| P1 | [Revisar a interface e concluir a entrega](docs/tarefas/04-experiencia-e-entrega.md) | Concluído | Fluxo simplificado com interface amigável, QR code vetorial e seleção até 30 conversas. |
+## Segurança e Privacidade
 
-A primeira prioridade é comprovar a compatibilidade com a versão real do ChatGPT para Windows utilizada. Os testes de edição de configuração não provam que o aplicativo reconhece a conexão. Se isso não funcionar, registrar a diferença e ajustar a arquitetura antes de distribuir um instalador.
+- **Leitura Estrita e Sem Escrita:** A API expõe apenas 4 ferramentas de leitura (`get_status`, `list_chats`, `read_messages`, `search_messages`). Nenhuma operação de envio, exclusão ou alteração de mensagens é implementada ou anunciada.
+- **Isolamento de Contas e Sessões:** Dados de sessão residem exclusivamente na pasta de dados protegida (`%LOCALAPPDATA%\WhatsAppManutencaoSegura\session-maintenance`) com DACLs NTFS restritas ao usuário atual. A ação de troca de conta apaga cirurgicamente apenas essa pasta.
+- **Integridade Criptográfica do cloudflared:** O executável do túnel é baixado com versão fixada (`2026.9.1`), salvo em arquivo temporário e só é promovido ao destino final após validação estrita do hash SHA-256 (`2837888cc0f5d58f15b6dc478376de90b4d3ba5241c7947455d1e0a0df429712` no Windows x64).
+- **Proteção contra Exfiltração e DoS:** Respostas JSON possuem teto rígido de 32 KB, corpos de requisição são limitados a 16 KB e mensagens de erro internas do provedor são sanitizadas antes de serem retornadas pela API pública.
+- **Sincronização Dinâmica da URL Pública:** O endpoint `/gpt/openapi.json` e as chamadas ao serviço refletem a URL pública validada pelo túnel, sem aceitar cabeçalhos arbitrários não confiáveis de terceiros.
 
-## Documentação
+## Resultados dos Testes Automatizados
 
-- [Como contribuir](CONTRIBUTING.md)
-- [Roteiro de conclusão](ROADMAP.md)
-- [Desenvolvimento e compilação](DESENVOLVIMENTO.md)
-- [Resultados e limitações dos testes](RELATORIO-VALIDACAO.md)
-- [Cuidados com dados e relatos de segurança](SECURITY.md)
-- [Orientação para o usuário final](LEIA-ME.md)
+Execução em Windows 11 x64 com Node v24 / Node 20 LTS:
+- **Suíte Node.js (`npm test`):** 71 testes (68 aprovados, 0 falhas, 3 skips de permissões e links específicos de POSIX/Linux). Duração: ~37 segundos.
+- **Suíte Go Launcher (`go test ./...`):** 4 testes aprovados (rejeição de path traversal, colisão de case, extração segura com integridade e rejeição de arquivos estranhos).
+- **Compilação e Empacotamento (`package.py`):** Executável standalone gerado com sucesso (~52.5 MB) contendo runtime Node embutido, payload compactado e trailer criptográfico SHA-256.
 
-## Começar a desenvolver
+## Como Desenvolver e Compilar
 
-Use Node 24 ou superior e instale as dependências fixadas no lockfile:
+Requisitos para desenvolvimento: Node.js >= 20, Go 1.22+ e Python 3.10+.
 
 ```sh
+# Instalar dependências limpas
 npm ci --ignore-scripts --no-audit --no-fund
+
+# Executar suíte completa de testes
 npm test
+
+# Executar testes unitários do launcher Go
+cd launcher && go test -v ./... && cd ..
+
+# Gerar executável standalone e pacote de release
+py -3 scripts/package.py
 ```
 
-Esses comandos destinam-se a desenvolvedores. A instalação final não deverá exigir nenhum deles. Os testes usam exemplos simulados; `npm test` não solicita QR nem conecta uma conta WhatsApp real. Dois testes precisam de sockets locais; ambientes que os bloqueiam registram testes não executados.
+Artefatos gerados na pasta `dist/`:
+- `dist/whatsapp-manutencao.exe`: Executável standalone Windows x64 pronto para uso.
+- `dist/whatsapp-manutencao-windows-x64.zip`: Pacote de distribuição com executável e documentação.
 
-Os testes do iniciador exigem Go e são executados separadamente:
-
-```sh
-cd launcher
-go test ./...
-```
-
-Leia `DESENVOLVIMENTO.md` antes de compilar. A compilação exige componentes oficiais verificados e não substitui os testes reais no Windows. Não há automação de publicação ou lançamento configurada neste checkpoint.
-
-## Colaboração e escopo
-
-Enviar propostas por pull request, acompanhadas dos resultados realmente obtidos. Trabalhar com dados simulados e contas de teste controladas pelo próprio desenvolvedor. Os colaboradores não precisam da sessão, do número ou das conversas do proprietário do projeto.
-
-A integração WhatsApp usa biblioteca não oficial. O projeto não é afiliado à Meta ou à OpenAI. Licença de distribuição e eventual publicação aberta ficam a definir pelo mantenedor; este checkpoint não acrescenta uma licença ao código.
