@@ -20,8 +20,8 @@ export function verifyChrome(binary) {
   { WA_CHROME_BINARY: binary });
 }
 export class WhatsAppProvider {
-  constructor({ pairing = false, headless, onQr = () => {}, onReady = () => {} } = {}) {
-    this.pairing = pairing; this.headless = headless ?? !pairing; this.onQr = onQr; this.onReady = onReady;
+  constructor({ pairing = false, headless, onQr = () => {}, onReady = () => {}, onDisconnected = () => {} } = {}) {
+    this.pairing = pairing; this.headless = headless ?? !pairing; this.onQr = onQr; this.onReady = onReady; this.onDisconnected = onDisconnected;
     this.state = 'not_started'; this.client = null; this.closed = false;
   }
   status() { return { connected: this.state === 'ready', state: this.state, pairing_required: this.state === 'pairing_required' }; }
@@ -34,6 +34,11 @@ export class WhatsAppProvider {
       verifyChrome(executablePath);
       const dataPath = secureDirectory(dataDirectory());
       const sessionDir = path.join(dataPath, 'session-maintenance');
+      if (process.platform === 'win32') {
+        try {
+          powershell(`$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter "name = 'chrome.exe'" | Where-Object { $_.CommandLine -like "*WhatsAppManutencaoSegura*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`);
+        } catch {}
+      }
       for (const f of ['lockfile', 'DevToolsActivePort']) {
         const p = path.join(sessionDir, f);
         try { if (existsSync(p)) unlinkSync(p); } catch {}
@@ -59,8 +64,8 @@ export class WhatsAppProvider {
         await this.patchClient();
         this.state = 'ready'; this.onReady();
       });
-      this.client.on('auth_failure', () => { this.state = 'authentication_failed'; });
-      this.client.on('disconnected', () => { this.state = 'disconnected'; });
+      this.client.on('auth_failure', () => { this.state = 'authentication_failed'; this.onDisconnected(); });
+      this.client.on('disconnected', () => { this.state = 'disconnected'; this.onDisconnected(); });
       await this.client.initialize();
       if (this.closed) await this.client.destroy().catch(() => {});
     } catch (error) {
@@ -104,7 +109,15 @@ export class WhatsAppProvider {
   async messages(chat, limit) { return chat.fetchMessages({ limit }); }
   async close() {
     this.closed = true;
+    const proc = this.client?.pupBrowser?.process();
     if (this.client) await this.client.destroy().catch(() => {});
+    if (proc?.pid) {
+      if (process.platform === 'win32') {
+        try { powershell(`Stop-Process -Id ${proc.pid} -Force -ErrorAction SilentlyContinue`); } catch {}
+      } else {
+        try { proc.kill('SIGKILL'); } catch {}
+      }
+    }
     this.state = 'stopped';
   }
 }

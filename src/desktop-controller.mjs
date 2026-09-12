@@ -46,7 +46,8 @@ export class DesktopController {
       this.error=null;this.qr=null;this.choices=[];this.phase='connecting';
       const provider=this.providerFactory({pairing:interactive,headless:true,
         onQr:qr=>{if(generation===this.generation){this.qr=qr;this.phase='pairing';}},
-        onReady:()=>{void this.ready(provider,generation,interactive).catch(()=>this.fail(generation));}
+        onReady:()=>{void this.ready(provider,generation,interactive).catch(()=>this.fail(generation));},
+        onDisconnected:()=>{if(generation===this.generation)this.fail(generation,'A sessão do WhatsApp foi desconectada. Clique em Tentar novamente para conectar.');}
       });
       this.provider=provider;
       clearTimeout(this.timer);
