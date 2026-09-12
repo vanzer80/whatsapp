@@ -92,7 +92,7 @@ export async function ensureCloudflared(directory = dataDirectory()) {
       if (parsed.protocol !== 'https:') {
         return reject(new Error('Download permitido apenas através de HTTPS.'));
       }
-      const req = https.get(currentUrl, { timeout: 30000 }, res => {
+      const req = https.get(currentUrl, { timeout: 30000, headers: { 'User-Agent': 'WhatsApp-Manutencao/0.3.0' } }, res => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           redirects++;
           if (redirects > 5) {

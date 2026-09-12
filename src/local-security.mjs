@@ -12,7 +12,6 @@ export function dataDirectory() {
 export function minimalEnvironment(source = process.env) {
   const keep = new Set(['systemroot','windir','comspec','userprofile','homedrive','homepath',
     'localappdata','appdata','programfiles','programfiles(x86)','programw6432',
-    'systemdrive','pathext','userdomain','username','computername',
     'temp','tmp','tmpdir','home','lang','lc_all','display','wayland_display','xdg_runtime_dir']);
   return Object.fromEntries(Object.entries(source).filter(([key]) => keep.has(key.toLowerCase())));
 }
@@ -20,17 +19,8 @@ export function minimalEnvironment(source = process.env) {
 export function powershell(command, extraEnv = {}) {
   const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
   const binary = path.join(sysRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const safeEnv = minimalEnvironment();
-  if (process.platform === 'win32') {
-    safeEnv.PATH = `${sysRoot}\\System32;${sysRoot};${sysRoot}\\System32\\WindowsPowerShell\\v1.0`;
-    safeEnv.PATHEXT = process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC';
-    if (process.env.SystemDrive) safeEnv.SystemDrive = process.env.SystemDrive;
-    if (process.env.USERDOMAIN) safeEnv.USERDOMAIN = process.env.USERDOMAIN;
-    if (process.env.USERNAME) safeEnv.USERNAME = process.env.USERNAME;
-    if (process.env.COMPUTERNAME) safeEnv.COMPUTERNAME = process.env.COMPUTERNAME;
-  }
-  return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
-    env: { ...safeEnv, ...extraEnv }, encoding: 'utf8', timeout: 30000,
+  return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-InputFormat', 'None', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    env: { ...process.env, ...extraEnv }, encoding: 'utf8', timeout: 30000,
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024
   });
 }
