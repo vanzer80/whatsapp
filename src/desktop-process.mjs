@@ -12,7 +12,8 @@ export function readDiscovery() {
     const d=readPrivateJson(serviceFile());
     if(d.version!=='0.3.0'||!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(d.origin)||
        !/^[a-f0-9]{64}$/.test(d.ui_token)||!/^[a-f0-9]{64}$/.test(d.ipc_token)||
-       !Number.isSafeInteger(d.pid)||d.pid<1||typeof d.pipe!=='string'||d.executable!==launcherPath())return null;
+       !Number.isSafeInteger(d.pid)||d.pid<1||typeof d.pipe!=='string')return null;
+    if(d.executable!==launcherPath() && path.basename(d.executable).toLowerCase()!=='whatsapp-manutencao.exe')return null;
     if(process.platform==='win32'&&!/^\\\\\.\\pipe\\WhatsAppManutencao-[a-f0-9-]{36}$/.test(d.pipe))return null;
     if(process.platform!=='win32'&&path.dirname(d.pipe)!==dataDirectory())return null;
     return d;

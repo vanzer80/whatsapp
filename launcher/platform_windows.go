@@ -28,21 +28,26 @@ func ps(script string,extra ...string)error {
  if command.Run()!=nil{return errors.New("Não foi possível proteger a instalação. Execute como usuário normal em uma pasta local do Windows.")};return nil
 }
 func secureFolder(folder string)error {
- return ps(`$ErrorActionPreference='Stop';
- $item=Get-Item -LiteralPath $env:WA_INSTALL_DIRECTORY -Force;
- if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {throw 'Reparse point';}
- $me=[Security.Principal.WindowsIdentity]::GetCurrent().User;
- $old=Get-Acl -LiteralPath $item.FullName;
- if ($old.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $me.Value) {throw 'Owner mismatch';}
- $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetOwner($me);$acl.SetAccessRuleProtection($true,$false);
- foreach ($sid in @($me,([Security.Principal.SecurityIdentifier]'S-1-5-18'))) {
-  $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);
-  $acl.AddAccessRule($rule);
- }
- Set-Acl -LiteralPath $item.FullName -AclObject $acl;
- $check=Get-Acl -LiteralPath $item.FullName;
- if (!$check.AreAccessRulesProtected){throw 'ACL not protected';}
- foreach($rule in $check.Access){$sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;if($sid -ne $me.Value -and $sid -ne 'S-1-5-18'){throw 'Unexpected access';}}`,"WA_INSTALL_DIRECTORY="+folder)
+	return ps(`$ErrorActionPreference='Stop';
+	$item=Get-Item -LiteralPath $env:WA_INSTALL_DIRECTORY -Force;
+	if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {throw 'Reparse point';}
+	$me=[Security.Principal.WindowsIdentity]::GetCurrent().User;
+	$old=$item.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner);
+	if ($old.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $me.Value) {throw 'Owner mismatch';}
+	$dir=[System.IO.DirectoryInfo]::new($item.FullName);
+	$acl=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
+	$acl.SetAccessRuleProtection($true,$false);
+	foreach ($rule in @($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))) {
+		$acl.PurgeAccessRules($rule.IdentityReference);
+	}
+	foreach ($sid in @($me,([Security.Principal.SecurityIdentifier]'S-1-5-18'))) {
+		$rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);
+		$acl.AddAccessRule($rule);
+	}
+	$dir.SetAccessControl($acl);
+	$check=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
+	if (!$check.AreAccessRulesProtected){throw 'ACL not protected';}
+	foreach($rule in $check.Access){$sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;if($sid -ne $me.Value -and $sid -ne 'S-1-5-18'){throw 'Unexpected access';}}`,"WA_INSTALL_DIRECTORY="+folder)
 }
 func openBrowser(address string)error {
  verb,_:=syscall.UTF16PtrFromString("open");url,_:=syscall.UTF16PtrFromString(address)
