@@ -34,10 +34,13 @@ export function noLinks(target) {
   }
 }
 
+const securedDirs = new Set();
 export function secureDirectory(directory = dataDirectory()) {
   noLinks(directory);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (!lstatSync(directory).isDirectory()) throw new Error('Pasta local inválida.');
+  const resolved = path.resolve(directory);
+  if (securedDirs.has(resolved)) return;
   if (process.platform === 'win32') {
     // Fixed script; the path travels as an environment value, never PowerShell source.
     powershell(`$ErrorActionPreference='Stop';
@@ -71,6 +74,7 @@ export function secureDirectory(directory = dataDirectory()) {
     if (lstatSync(directory).uid !== process.getuid()) throw new Error('A pasta local pertence a outro usuário.');
     chmodSync(directory, 0o700);
   }
+  securedDirs.add(resolved);
   return directory;
 }
 
