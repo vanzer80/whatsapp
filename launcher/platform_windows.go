@@ -32,22 +32,26 @@ func secureFolder(folder string)error {
 	$item=Get-Item -LiteralPath $env:WA_INSTALL_DIRECTORY -Force;
 	if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {throw 'Reparse point';}
 	$me=[Security.Principal.WindowsIdentity]::GetCurrent().User;
+	$adminSid='S-1-5-32-544';
 	$old=$item.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner);
-	if ($old.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $me.Value) {throw 'Owner mismatch';}
+	$owner=$old.GetOwner([Security.Principal.SecurityIdentifier]).Value;
+	if ($owner -ne $me.Value -and $owner -ne $adminSid) {throw 'Owner mismatch';}
 	$dir=[System.IO.DirectoryInfo]::new($item.FullName);
 	$acl=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
 	$acl.SetAccessRuleProtection($true,$false);
 	foreach ($rule in @($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))) {
 		$acl.PurgeAccessRules($rule.IdentityReference);
 	}
-	foreach ($sid in @($me,([Security.Principal.SecurityIdentifier]'S-1-5-18'))) {
+	$allowedSids = @($me, ([Security.Principal.SecurityIdentifier]'S-1-5-18'));
+	if ($owner -eq $adminSid) { $allowedSids += [Security.Principal.SecurityIdentifier]$adminSid; }
+	foreach ($sid in $allowedSids) {
 		$rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);
 		$acl.AddAccessRule($rule);
 	}
 	$dir.SetAccessControl($acl);
 	$check=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
 	if (!$check.AreAccessRulesProtected){throw 'ACL not protected';}
-	foreach($rule in $check.Access){$sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;if($sid -ne $me.Value -and $sid -ne 'S-1-5-18'){throw 'Unexpected access';}}`,"WA_INSTALL_DIRECTORY="+folder)
+	foreach($rule in $check.Access){$sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;if($sid -ne $me.Value -and $sid -ne 'S-1-5-18' -and $sid -ne $adminSid){throw 'Unexpected access';}}`,"WA_INSTALL_DIRECTORY="+folder)
 }
 func openBrowser(address string)error {
  verb,_:=syscall.UTF16PtrFromString("open");url,_:=syscall.UTF16PtrFromString(address)
