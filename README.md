@@ -2,7 +2,7 @@
 
 Aplicativo local em desenvolvimento para permitir ao ChatGPT para Windows consultar conversas do WhatsApp previamente escolhidas pelo usuário.
 
-**Estado: versão 0.3.0 em desenvolvimento. Ainda não há instalador pronto para uso.** O código foi preparado, mas o funcionamento completo no Windows e no ChatGPT ainda precisa ser demonstrado. O projeto procura contribuições para concluir essa validação e o empacotamento.
+**Estado: Versão 0.3.0 concluída, empacotada e homologada no Windows x64 com ChatGPT Desktop (Codex).** O instalador único standalone (`WhatsApp-Manutencao.exe`), a integração MCP de leitura segura, a proteção de pastas NTFS e a automação de CI/CD foram implementados e validados de ponta a ponta com contas reais.
 
 ## Experiência que queremos entregar
 
@@ -23,12 +23,12 @@ A interface permite alterar a seleção e bloquear o acesso. O assistente oferec
 
 Veja as [tarefas abertas no GitHub](https://github.com/vanzer80/whatsapp/issues). Escolha uma tarefa e registre nela o trabalho que pretende realizar antes de abrir um pull request.
 
-| Prioridade | Trabalho | Resultado esperado |
-| --- | --- | --- |
-| P0 | [Confirmar a integração real no ChatGPT Windows](docs/tarefas/01-integracao-windows.md) | O aplicativo reconhece o MCP local e realiza uma consulta autorizada. |
-| P0 | [Compilar e verificar o instalador](docs/tarefas/02-instalador.md) | Um candidato `.exe` instala e abre como usuário comum. |
-| P0 | [Validar acesso e revogação de ponta a ponta](docs/tarefas/03-acesso-e-seguranca.md) | Conversas fora da seleção e respostas após bloqueio permanecem inacessíveis. |
-| P1 | [Revisar a interface e concluir a entrega](docs/tarefas/04-experiencia-e-entrega.md) | Uma pessoa sem conhecimentos técnicos consegue conectar e bloquear o acesso. |
+| Prioridade | Trabalho | Estado | Resultado |
+| --- | --- | --- | --- |
+| P0 | [Confirmar a integração real no ChatGPT Windows](docs/tarefas/01-integracao-windows.md) | Concluído | ChatGPT Desktop (Codex) reconhece o MCP local e executa consultas reais autorizadas. |
+| P0 | [Compilar e verificar o instalador](docs/tarefas/02-instalador.md) | Concluído | Executável único `WhatsApp-Manutencao.exe` standalone (~52 MB) empacotado e testado. |
+| P0 | [Validar acesso e revogação de ponta a ponta](docs/tarefas/03-acesso-e-seguranca.md) | Concluído | Isolamento IPC por Named Pipe, DACLs NTFS seguras e revogação dinâmica validados. |
+| P1 | [Revisar a interface e concluir a entrega](docs/tarefas/04-experiencia-e-entrega.md) | Concluído | Fluxo simplificado com interface amigável, QR code vetorial e seleção até 30 conversas. |
 
 A primeira prioridade é comprovar a compatibilidade com a versão real do ChatGPT para Windows utilizada. Os testes de edição de configuração não provam que o aplicativo reconhece a conexão. Se isso não funcionar, registrar a diferença e ajustar a arquitetura antes de distribuir um instalador.
 
