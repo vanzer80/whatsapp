@@ -66,6 +66,12 @@ jobs:
           Get-ChildItem -Path dist
           if (-not (Test-Path "dist/whatsapp-manutencao.exe")) { throw "dist/whatsapp-manutencao.exe not found" }
           if (-not (Test-Path "dist/whatsapp-manutencao-windows-x64.zip")) { throw "dist/whatsapp-manutencao-windows-x64.zip not found" }
+          $checksums = @("dist/whatsapp-manutencao.exe", "dist/whatsapp-manutencao-windows-x64.zip") | ForEach-Object {
+            $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_
+            "$($hash.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($hash.Path))"
+          }
+          $checksums | Set-Content -Encoding ascii -Path dist/SHA256SUMS
+          $checksums | ForEach-Object { Write-Host $_ }
           Write-Host "Build artifacts verified successfully."
 
       - name: Upload Build Artifacts
@@ -75,5 +81,6 @@ jobs:
           path: |
             dist/whatsapp-manutencao.exe
             dist/whatsapp-manutencao-windows-x64.zip
+            dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
