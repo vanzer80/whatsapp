@@ -25,7 +25,7 @@ export async function running() {
     const r=await fetch(d.origin+'/api/status',{headers:{Authorization:`Bearer ${d.ui_token}`},redirect:'error',signal:AbortSignal.timeout(1500)});
     if(!r.ok)return null;
     const state=await r.json();
-    if(state.version!=='0.3.0'||state.build_id!=='0.3.0-r2')return null;
+    if(state.version!=='0.3.0'||state.build_id!=='0.3.0-r3')return null;
     if(!Array.isArray(state.capabilities)||!state.capabilities.includes('mcp_reader')||!state.capabilities.includes('gpt_actions'))return null;
     return d;
   }catch{return null;}

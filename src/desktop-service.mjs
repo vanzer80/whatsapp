@@ -164,7 +164,7 @@ export async function startDesktopService({controller=new DesktopController(),di
     publicUrl:tunnelUrl,
     externalQueryConfirmed:false,
     capabilities:['mcp_reader','gpt_actions'],
-    build_id:'0.3.0-r2'
+    build_id:'0.3.0-r3'
   };
   const tunnelManager=new CloudflareTunnelManager({directory});
   tunnelManager.onUrlChange=url=>{connection.publicUrl=url;};

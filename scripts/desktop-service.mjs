@@ -4,10 +4,14 @@ if (process.platform === 'win32') {
   const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
   process.env.PATH = `${sysRoot}\\System32;${sysRoot}`;
 }
-process.on('unhandledRejection', reason => {
-  if (reason?.name === 'TargetCloseError' || reason?.message?.includes('Target closed') || reason?.message?.includes('Protocol error')) return;
-});
 let unlock,service;
+process.on('unhandledRejection', () => {
+  // whatsapp-web.js uses async event listeners. Unexpected failures must revoke
+  // the current attempt instead of leaving the UI apparently connected. Never
+  // print the rejection: it may contain private library payloads.
+  if (service) service.controller.fail(service.controller.generation);
+  else process.exitCode = 1;
+});
 try {
   const {acquireLock,launcherPath}=await import('../src/desktop-process.mjs');
   unlock=acquireLock();

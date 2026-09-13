@@ -1,7 +1,8 @@
-import { existsSync, unlinkSync, rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { ReadError } from './core.mjs';
 import { dataDirectory, noLinks, powershell, secureDirectory } from './local-security.mjs';
+import { createNavigationRecovery } from './browser-navigation.mjs';
 
 export { dataDirectory } from './local-security.mjs';
 export function clearSessionMaintenance(directory = dataDirectory()) {
@@ -30,6 +31,7 @@ export class WhatsAppProvider {
   constructor({ pairing = false, headless, onQr = () => {}, onReady = () => {}, onDisconnected = () => {} } = {}) {
     this.pairing = pairing; this.headless = headless ?? !pairing; this.onQr = onQr; this.onReady = onReady; this.onDisconnected = onDisconnected;
     this.state = 'not_started'; this.client = null; this.closed = false;
+    this.navigationAbort = new AbortController();
   }
   status() { return { connected: this.state === 'ready', state: this.state, pairing_required: this.state === 'pairing_required' }; }
   accountId() { return this.client?.info?.wid?._serialized ?? null; }
@@ -40,34 +42,16 @@ export class WhatsAppProvider {
       if (!executablePath) throw new ReadError('CHROME_MISSING', 'Instale o Google Chrome na localização padrão.');
       verifyChrome(executablePath);
       const dataPath = secureDirectory(dataDirectory());
-      const sessionDir = path.join(dataPath, 'session-maintenance');
-      for (const f of ['lockfile', 'DevToolsActivePort']) {
-        const p = path.join(sessionDir, f);
-        try { if (existsSync(p)) unlinkSync(p); } catch {}
-      }
       const { default: wwebjs } = await import('whatsapp-web.js');
       if (this.closed) return;
       const authStrategy = new wwebjs.LocalAuth({ clientId: 'maintenance', dataPath });
-      const origLogout = authStrategy.logout.bind(authStrategy);
-      authStrategy.logout = async () => {
-        try { await origLogout(); } catch {}
-      };
-      this.client = new wwebjs.Client({
+      this.attachClient(new wwebjs.Client({
         deviceName: 'WhatsApp Manutencao 0.3.0',
         authStrategy,
         puppeteer: { headless: this.headless, executablePath },
         webVersionCache: { type: 'none' },
         qrMaxRetries: 5, takeoverOnConflict: false
-      });
-      const origInject = this.client.inject.bind(this.client);
-      this.client.inject = async () => {
-        try {
-          return await origInject();
-        } catch (e) {
-          if (this.closed || e?.name === 'TargetCloseError' || e?.message?.includes('Target closed') || e?.message?.includes('Protocol error')) return;
-          throw e;
-        }
-      };
+      }));
       this.client.on('qr', qr => {
         if (this.closed) { void this.client.destroy().catch(() => {}); return; }
         this.state = 'pairing_required';
@@ -78,20 +62,32 @@ export class WhatsAppProvider {
       this.client.on('ready', async () => {
         if (this.closed) { void this.client.destroy().catch(() => {}); return; }
         await this.patchClient();
+        if (this.closed) return;
         this.state = 'ready'; this.onReady();
       });
-      this.client.on('auth_failure', () => { this.state = 'authentication_failed'; this.onDisconnected(); });
-      this.client.on('disconnected', () => { this.state = 'disconnected'; this.onDisconnected(); });
+      this.client.on('auth_failure', () => { if (!this.closed) { this.state = 'authentication_failed'; this.onDisconnected(); } });
+      this.client.on('disconnected', () => { if (!this.closed) { this.state = 'disconnected'; this.onDisconnected(); } });
       await this.client.initialize();
       if (this.closed) await this.client.destroy().catch(() => {});
     } catch (error) {
       if (this.closed) return;
       this.state = error.code === 'CHROME_MISSING' ? 'chrome_missing' : 'connection_error';
       // Do not put library error payloads, session paths or QR values in MCP logs.
-      throw new ReadError('CONNECTION_FAILED', this.state === 'chrome_missing'
+      const failure = new ReadError('CONNECTION_FAILED', this.state === 'chrome_missing'
         ? 'Google Chrome não localizado. Instale o navegador e tente novamente.'
         : 'A conexão falhou. Feche outras instâncias do aplicativo e tente novamente.');
+      // Preserve the original exception internally; public APIs use safe errors.
+      failure.cause = error;
+      throw failure;
     }
+  }
+  attachClient(client) {
+    this.client = client;
+    client.inject = createNavigationRecovery({
+      getPage: () => client.pupPage,
+      inject: client.inject.bind(client),
+      signal: this.navigationAbort.signal
+    });
   }
   async patchClient() {
     try {
@@ -131,14 +127,13 @@ export class WhatsAppProvider {
   }
   async close() {
     this.closed = true;
+    this.navigationAbort.abort();
     const proc = this.client?.pupBrowser?.process();
     if (this.client) await this.client.destroy().catch(() => {});
-    if (proc?.pid) {
-      if (process.platform === 'win32') {
-        try { powershell(`Stop-Process -Id ${proc.pid} -Force -ErrorAction SilentlyContinue`); } catch {}
-      } else {
-        try { proc.kill('SIGKILL'); } catch {}
-      }
+    if (proc?.pid && proc.exitCode === null && proc.signalCode === null && !proc.killed) {
+      // Use Puppeteer's own ChildProcess, never a process-name search or a stale
+      // numeric PID passed to another process after browser.close().
+      try { proc.kill('SIGKILL'); } catch {}
     }
     this.state = 'stopped';
   }
