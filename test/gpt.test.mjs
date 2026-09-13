@@ -455,7 +455,7 @@ test('comunicação da URL pública ao serviço atualiza o OpenAPI schema', asyn
   const statusData = await statusRes.json();
   assert.equal(statusData.public_url, 'https://exemplo-publico.trycloudflare.com');
   assert.equal(statusData.tunnel_active, true);
-  assert.deepEqual(statusData.capabilities, ['mcp_reader', 'gpt_actions']);
+  assert.deepEqual(statusData.capabilities, ['mcp_reader', 'mcp_writer', 'gpt_actions', 'gpt_write_actions']);
 
   // Consulta GET /gpt/openapi.json para comprovar anúncio do HTTPS público correto
   const openApiRes = await fetch(`${origin}/gpt/openapi.json`);
@@ -487,7 +487,8 @@ test('DesktopController.switchAccount limpa sessão, revoga permissões e permit
   const controller = new DesktopController({
     access,
     providerFactory: () => mockProvider,
-    browserAvailable: () => true
+    browserAvailable: () => true,
+    clearSession: () => {}
   });
   t.after(() => controller.close());
 
@@ -816,3 +817,37 @@ test('F06: CloudflareTunnelManager controla geração, stop cancela inicializaç
 });
 
 
+test('OpenAPI anuncia as quatro operações de escrita controlada',()=>{
+  const spec=buildOpenApiSpec('https://write.example.test');
+  assert.ok(spec.paths['/gpt/send']);
+  assert.ok(spec.paths['/gpt/groups/create']);
+  assert.ok(spec.paths['/gpt/groups/update']);
+  assert.ok(spec.paths['/gpt/groups/participants']);
+  assert.equal(spec.paths['/gpt/send'].post.operationId,'sendWhatsAppMessage');
+  assert.ok(spec.components.schemas.SendMessageRequest);
+  assert.ok(spec.components.schemas.CreateGroupRequest);
+});
+
+test('GPT Action /gpt/send executa Writer somente com scope explícito',async t=>{
+  const { Writer }=await import('../src/writer.mjs');
+  const directory=mkdtempSync(path.join(tmpdir(),'wa-gpt-write-'));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const accessFile=path.join(directory,'access.json');
+  savePolicy(ACCOUNT,[GROUP],accessFile,['whatsapp.read','whatsapp.send']);
+  const access=new AccessStore(accessFile),provider=fixtures();
+  const reader=new Reader(provider,{access,cooldownMs:0}),writer=new Writer(provider,{access});
+  const gptToken=getOrCreateGptToken(directory);
+  const handler=createGptHandler({getReader:()=>reader,getWriter:()=>writer,getGptToken:()=>gptToken});
+  const req=createMockRequest({method:'POST',url:'/gpt/send',headers:{authorization:`Bearer ${gptToken}`,'content-type':'application/json'},body:JSON.stringify({chat_id:GROUP,text:'SIMULADO GPT',idempotency_key:'gpt-send-0001'})});
+  const res=createMockResponse();
+  await handler(req,res,new URL('http://127.0.0.1/gpt/send'));
+  assert.equal(res.statusCode,200);
+  assert.equal(res.json().ok,true);
+  assert.equal(provider.calls.filter(c=>Array.isArray(c)&&c[0]==='sendMessage').length,1);
+  savePolicy(ACCOUNT,[GROUP],accessFile,['whatsapp.read']);
+  const deniedReq=createMockRequest({method:'POST',url:'/gpt/send',headers:{authorization:`Bearer ${gptToken}`,'content-type':'application/json'},body:JSON.stringify({chat_id:GROUP,text:'NEGADO',idempotency_key:'gpt-send-0002'})});
+  const deniedRes=createMockResponse();
+  await handler(deniedReq,deniedRes,new URL('http://127.0.0.1/gpt/send'));
+  assert.equal(deniedRes.statusCode,403);
+  assert.equal(deniedRes.json().code,'WRITE_SCOPE_REQUIRED');
+});

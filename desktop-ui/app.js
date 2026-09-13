@@ -35,7 +35,14 @@ async function refresh(){
     document.querySelectorAll('.steps li').forEach((e,i)=>{e.classList.toggle('active',i===index);e.classList.toggle('done',i<index);});
     if(phase==='pairing'&&state.qr_svg)$('qr-image').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(state.qr_svg);
     else $('qr-image').removeAttribute('src');
-    if(phase==='choose'&&!loadedChoices){choices=(await api('chats')).chats;selection.clear();loadedChoices=true;renderChoices();}
+    if(phase==='choose'&&!loadedChoices){
+      choices=(await api('chats')).chats;selection=new Set(choices.filter(c=>c.authorized).map(c=>c.id));
+      const scopes=new Set(state.scopes||['whatsapp.read']);
+      if($('scope-send'))$('scope-send').checked=scopes.has('whatsapp.send');
+      if($('scope-group-create'))$('scope-group-create').checked=scopes.has('whatsapp.group.create');
+      if($('scope-group-manage'))$('scope-group-manage').checked=scopes.has('whatsapp.group.manage');
+      loadedChoices=true;renderChoices();
+    }
     if(phase!=='choose')loadedChoices=false;
     if(phase==='ready'){
       $('allowed-count').textContent=`${state.allowed_count} conversa${state.allowed_count===1?'':'s'}`;
@@ -80,7 +87,7 @@ $('setup').addEventListener('click',()=>act('setup'));
 $('reconnect').addEventListener('click',()=>act(current?.registered?'connect':'setup'));
 $('retry').addEventListener('click',()=>act(current?.registered?'connect':'setup'));
 $('edit').addEventListener('click',()=>act('edit'));
-$('authorize').addEventListener('click',()=>act('authorize',{chat_ids:[...selection]}));
+$('authorize').addEventListener('click',()=>{const scopes=['whatsapp.read'];if($('scope-send')?.checked)scopes.push('whatsapp.send');if($('scope-group-create')?.checked)scopes.push('whatsapp.group.create');if($('scope-group-manage')?.checked)scopes.push('whatsapp.group.manage');return act('authorize',{chat_ids:[...selection],scopes});});
 $('filter').addEventListener('input',renderChoices);
 for(const b of document.querySelectorAll('.block'))b.addEventListener('click',()=>act('block'));
 $('switch-account')?.addEventListener('click',async()=>{

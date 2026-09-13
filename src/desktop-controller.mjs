@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { Reader } from './core.mjs';
-import { AccessStore, savePolicy, validChatId } from './access.mjs';
+import { ACCESS_SCOPES, AccessStore, savePolicy, validChatId } from './access.mjs';
+import { Writer } from './writer.mjs';
 import { writePrivateJson } from './local-security.mjs';
 import { WhatsAppProvider, chromePath, clearSessionMaintenance } from './provider.mjs';
 
@@ -16,19 +17,28 @@ export function qrSvg(value) {
 }
 const safeName=value=>String(value??'').replace(/\p{C}/gu,' ').slice(0,180);
 export class DesktopController {
-  constructor({access=new AccessStore(),providerFactory=opts=>new WhatsAppProvider(opts),browserAvailable=()=>Boolean(chromePath())}={}) {
-    this.access=access;this.providerFactory=providerFactory;this.browserAvailable=browserAvailable;
+  constructor({access=new AccessStore(),providerFactory=opts=>new WhatsAppProvider(opts),browserAvailable=()=>Boolean(chromePath()),clearSession=clearSessionMaintenance}={}) {
+    this.access=access;this.providerFactory=providerFactory;this.browserAvailable=browserAvailable;this.clearSession=clearSession;
     this.provider=null;this.phase='welcome';this.qr=null;this.error=null;this.choices=[];this.generation=0;this.timer=null;this.changing=false;
     this.reader=new Reader({
       status:()=>this.provider?.status()??{connected:false,state:'not_started'},
       accountId:()=>this.provider?.accountId()??null,
       chat:id=>this.provider.chat(id),messages:(chat,limit)=>this.provider.messages(chat,limit)
     },{access});
+    this.writer=new Writer({
+      status:()=>this.provider?.status()??{connected:false,state:'not_started'},
+      accountId:()=>this.provider?.accountId()??null,
+      sendMessage:(...args)=>this.provider.sendMessage(...args),
+      createGroup:(...args)=>this.provider.createGroup(...args),
+      updateGroup:(...args)=>this.provider.updateGroup(...args),
+      manageGroupParticipants:(...args)=>this.provider.manageGroupParticipants(...args)
+    },{access});
   }
   status() {
     const policy=this.access.snapshot(this.provider?.accountId());
     return {phase:this.phase,connected:Boolean(this.provider?.status().connected),allowed_count:policy?.allowed_chat_ids.length??0,
-      browser_available:this.browserAvailable(),error:this.error,version:'0.3.0',qr_svg:this.qr?qrSvg(this.qr):null};
+      browser_available:this.browserAvailable(),error:this.error,version:'0.3.0',
+      scopes:policy?.scopes??['whatsapp.read'],qr_svg:this.qr?qrSvg(this.qr):null};
   }
   revoke() {
     const previous=this.access.load();
@@ -77,29 +87,32 @@ export class DesktopController {
     if(!provider?.status().connected)throw new Error('Conecte seu WhatsApp primeiro.');
     const chats=await provider.chats();
     if(generation!==this.generation)return;
+    const allowed=new Set(this.access.snapshot(provider.accountId())?.allowed_chat_ids??[]);
     this.choices=chats.filter(c=>validChatId(c.id?._serialized)&&!c.isLocked).slice(0,5000)
-      .map(c=>({id:c.id._serialized,name:safeName(c.name),group:Boolean(c.isGroup)}))
+      .map(c=>({id:c.id._serialized,name:safeName(c.name),group:Boolean(c.isGroup),authorized:allowed.has(c.id._serialized)}))
       .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
     this.phase='choose';
   }
   async edit() {
     if(this.changing)throw new Error('Aguarde a operação atual.');
     this.changing=true;
-    try {this.revoke();await this.loadChoices();}
+    try {await this.loadChoices();}
     finally {this.changing=false;}
   }
-  async authorize(ids) {
+  async authorize(ids,scopes=['whatsapp.read']) {
     if(this.changing)throw new Error('Aguarde a operação atual.');
     if(this.phase!=='choose'||!this.provider?.status().connected)throw new Error('Conecte o WhatsApp e selecione as conversas.');
     if(!Array.isArray(ids)||ids.length<1||ids.length>30||!ids.every(validChatId)||new Set(ids).size!==ids.length)
       throw new Error('Selecione de 1 a 30 conversas.');
     if(ids.some(id=>!this.choices.some(c=>c.id===id)))throw new Error('A seleção contém uma conversa indisponível.');
+    if(!Array.isArray(scopes)||!scopes.length||!scopes.includes('whatsapp.read')||scopes.some(s=>!ACCESS_SCOPES.includes(s))||new Set(scopes).size!==scopes.length)
+      throw new Error('A seleção de permissões é inválida.');
     this.changing=true;
     const provider=this.provider,account=provider.accountId(),generation=this.generation;
     try {
       for(const id of ids){const c=await provider.chat(id);if(!c||c.isLocked||c.id?._serialized!==id)throw new Error('Uma conversa selecionada não está mais disponível.');}
       if(generation!==this.generation || provider!==this.provider || account!==provider.accountId() || !provider.status().connected)throw new Error('A conexão mudou. Selecione novamente.');
-      savePolicy(account,ids,this.access.file);this.choices=[];this.phase='ready';
+      savePolicy(account,ids,this.access.file,scopes);this.choices=[];this.phase='ready';
     } finally {this.changing=false;}
   }
   async disconnect() {
@@ -115,7 +128,7 @@ export class DesktopController {
       }
     }
     if(generation!==this.generation)return;
-    clearSessionMaintenance();
+    this.clearSession();
   }
   async switchAccount() {
     if(this.changing)throw new Error('Aguarde a operação atual.');
@@ -131,7 +144,7 @@ export class DesktopController {
         } catch {}
       }
       if(generation!==this.generation)return;
-      clearSessionMaintenance();
+      this.clearSession();
     } finally {this.changing=false;}
     if(generation!==this.generation)return;
     await this.connect({interactive:true});

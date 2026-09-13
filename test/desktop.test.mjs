@@ -63,7 +63,7 @@ test('registro recusa config.toml que aponta para outro arquivo',{skip:process.p
 function controller(t){
   const directory=mkdtempSync(path.join(tmpdir(),'wad-')),file=path.join(directory,'access.json');
   const providers=[];
-  const control=new DesktopController({access:new AccessStore(file),browserAvailable:()=>true,providerFactory:opts=>{
+  const control=new DesktopController({access:new AccessStore(file),browserAvailable:()=>true,clearSession:()=>{},providerFactory:opts=>{
     const provider=fixtures();provider.state='not_started';provider.closed=false;provider.opts=opts;
     provider.start=async()=>{provider.state='ready';opts.onReady();};
     provider.close=async()=>{provider.closed=true;provider.state='stopped';};
@@ -92,9 +92,11 @@ test('seleção recusa conversa ausente, bloqueada, duplicada ou bloqueada depoi
   await assert.rejects(()=>control.authorize([GROUP]),/não está mais disponível/);
   assert.equal(control.access.snapshot(ACCOUNT),null);
 });
-test('editar revoga a seleção anterior e bloquear descarta uma leitura em andamento',async t=>{
+test('editar preserva a autorização anterior até salvar nova seleção e bloquear revoga tudo',async t=>{
   const {control,providers}=controller(t);await choose(control);await control.authorize([GROUP]);
-  await control.edit();assert.equal(control.access.snapshot(ACCOUNT),null);
+  await control.edit();
+  assert.deepEqual(control.access.snapshot(ACCOUNT)?.allowed_chat_ids,[GROUP]);
+  assert.equal(control.choices.find(c=>c.id===GROUP)?.authorized,true);
   await control.authorize([GROUP]);
   const entered=deferred(),release=deferred();
   providers[0].messages=async()=>{entered.resolve();return release.promise;};
@@ -188,7 +190,7 @@ test('HTTP local exige segredo e origem correta e não expõe arquivos ou açõe
   assert.equal((await post('/api/block',{})).status,200);
   assert.equal(server.controller.phase,'blocked');
 });
-test('canal local recusa segredo incorreto e anuncia somente as quatro ferramentas de leitura',async t=>{
+test('canal local recusa segredo incorreto e anuncia leitura e escrita com scopes aplicados em execução',async t=>{
   const server=await service(t);if(!server)return;const d=server.discovery;
   const bad=net.createConnection(d.pipe);bad.on('error',()=>{});await once(bad,'connect');
   const rejected=once(bad,'close');bad.write(JSON.stringify({authenticate:d.ui_token})+'\n');await rejected;
@@ -197,8 +199,12 @@ test('canal local recusa segredo incorreto e anuncia somente as quatro ferrament
   try{
     await client.connect(new AuthClientTransport(d.pipe,d.ipc_token));
     const result=await client.listTools();
-    assert.deepEqual(result.tools.map(t=>t.name).sort(),['get_status','list_chats','read_messages','search_messages']);
-    assert.ok(result.tools.every(t=>t.annotations.readOnlyHint));
+    assert.deepEqual(result.tools.map(t=>t.name).sort(),['create_group','get_status','list_chats','manage_group_participants','read_messages','search_messages','send_message','update_group']);
+    const deniedWrite=await client.callTool({name:'send_message',arguments:{chat_id:GROUP,text:'negado',idempotency_key:'desktop-denied-1'}});
+    assert.equal(deniedWrite.isError,true);
+    assert.equal(deniedWrite.structuredContent.error.code,'WRITE_SCOPE_REQUIRED');
+    assert.ok(result.tools.filter(t=>['get_status','list_chats','read_messages','search_messages'].includes(t.name)).every(t=>t.annotations.readOnlyHint));
+    assert.ok(result.tools.filter(t=>['send_message','create_group','update_group','manage_group_participants'].includes(t.name)).every(t=>!t.annotations.readOnlyHint));
     const data=await client.callTool({name:'read_messages',arguments:{chat_id:GROUP,limit:1}});
     assert.match(data.structuredContent.messages[0].text,/SIMULADO/);
     assert.doesNotMatch(JSON.stringify(data),new RegExp(d.ui_token+'|'+d.ipc_token));

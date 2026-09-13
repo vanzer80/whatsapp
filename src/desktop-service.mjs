@@ -104,8 +104,9 @@ export function createWebHandler(controller,connection,register=()=>{},gptHandle
       else if(pathname==='/api/connect')await controller.connect();
       else if(pathname==='/api/edit')await controller.edit();
       else if(pathname==='/api/authorize') {
-        if(Object.keys(input).join(',')!=='chat_ids')throw new Error('Solicitação inválida.');
-        await controller.authorize(input.chat_ids);
+        const keys=Object.keys(input).sort();
+        if(keys.some(k=>!['chat_ids','scopes'].includes(k))||!keys.includes('chat_ids'))throw new Error('Solicitação inválida.');
+        await controller.authorize(input.chat_ids,input.scopes??['whatsapp.read']);
       }
       else if(pathname==='/api/block')await controller.block();
       else if(pathname==='/api/disconnect')await controller.disconnect();
@@ -163,7 +164,7 @@ export async function startDesktopService({controller=new DesktopController(),di
     origin:null,
     publicUrl:tunnelUrl,
     externalQueryConfirmed:false,
-    capabilities:['mcp_reader','gpt_actions'],
+    capabilities:['mcp_reader','mcp_writer','gpt_actions','gpt_write_actions'],
     build_id:'0.3.0-r2'
   };
   const tunnelManager=new CloudflareTunnelManager({directory});
@@ -172,6 +173,7 @@ export async function startDesktopService({controller=new DesktopController(),di
 
   const gptHandler=createGptHandler({
     getReader:()=>controller.reader,
+    getWriter:()=>controller.writer,
     getGptToken:()=>connection.gptToken,
     getPublicUrl:()=>connection.publicUrl||null,
     onExternalQuery:()=>{connection.externalQueryConfirmed=true;}
@@ -179,7 +181,7 @@ export async function startDesktopService({controller=new DesktopController(),di
   const connections=new Set();let closed=false,origin;
   const pipeServer=net.createServer(socket=>{
     socket.setNoDelay(true);connections.add(socket);socket.once('close',()=>connections.delete(socket));
-    const server=createMcpServer(controller.reader);
+    const server=createMcpServer(controller.reader,controller.writer);
     server.server.oninitialized=()=>{connection.lastMcpSeen=new Date().toISOString();};
     server.connect(new PipeTransport(socket,ipcToken)).catch(()=>socket.destroy());
   });

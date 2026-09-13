@@ -23,12 +23,17 @@ export function fixtures() {
     status() {return {connected:this.state==='ready',state:this.state};},
     async chats(){calls.push('chats');return chats;},
     async chat(id){calls.push(['chat',id]);return chats.find(c=>c.id._serialized===id);},
-    async messages(chat,limit){calls.push(['messages',chat.id._serialized,limit]);return messages.slice(-limit);}
+    async messages(chat,limit){calls.push(['messages',chat.id._serialized,limit]);return messages.slice(-limit);},
+    async sendMessage(id,text){calls.push(['sendMessage',id,text]);return {id:{_serialized:'sent-fixture-1'}};},
+    async createGroup(name,ids){calls.push(['createGroup',name,ids]);return {gid:{_serialized:'120000000099@g.us'},title:name};},
+    async updateGroup(id,changes){calls.push(['updateGroup',id,changes]);},
+    async manageGroupParticipants(id,action,ids){calls.push(['manageGroupParticipants',id,action,ids]);}
   };
 }
 
-export function fixtureAccess(ids = [GROUP, PRIVATE, LOCKED]) {
-  const policy = { version:1, account_id:ACCOUNT, allowed_chat_ids:ids, revision:'00000000-0000-0000-0000-000000000001' };
+export function fixtureAccess(ids = [GROUP, PRIVATE, LOCKED], scopes = null) {
+  const policy = scopes ? { version:2, account_id:ACCOUNT, allowed_chat_ids:ids, scopes, revision:'00000000-0000-0000-0000-000000000001' } :
+    { version:1, account_id:ACCOUNT, allowed_chat_ids:ids, revision:'00000000-0000-0000-0000-000000000001' };
   return { snapshot(account) { return account === ACCOUNT && ids.length ? policy : null; },
     unchanged(snapshot, account) { return account === ACCOUNT && snapshot === policy; } };
 }

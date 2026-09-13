@@ -68,7 +68,8 @@ export class Reader {
     const status = this.provider.status();
     const policy = this.access.snapshot(this.provider.accountId());
     if (name === 'get_status') return { connected: Boolean(status.connected), state: status.state,
-      read_only: true, chat_scope: 'local_allowlist', access_enabled: Boolean(policy), allowed_chat_count: policy?.allowed_chat_ids.length ?? 0 };
+      read_only: !policy?.scopes?.some(scope => scope !== 'whatsapp.read'), write_scopes: policy?.scopes?.filter(scope => scope !== 'whatsapp.read') ?? [],
+      chat_scope: 'local_allowlist', access_enabled: Boolean(policy), allowed_chat_count: policy?.allowed_chat_ids.length ?? 0 };
     if (!status.connected) throw new ReadError('NOT_CONNECTED', 'Abra o aplicativo WhatsApp Manutenção e conecte seu WhatsApp.');
     if (!policy) throw new ReadError('ACCESS_NOT_CONFIGURED', 'Nenhuma conversa autorizada para esta conta. Escolha as conversas no aplicativo WhatsApp Manutenção.');
     if (this.busy) throw new ReadError('BUSY', 'Uma consulta já está em andamento. Aguarde sua conclusão.');

@@ -123,6 +123,23 @@ export class WhatsAppProvider {
     return this.client.getChatById(id);
   }
   async messages(chat, limit) { return chat.fetchMessages({ limit }); }
+  async sendMessage(chatId, text) { return this.client.sendMessage(chatId, text); }
+  async createGroup(name, participantIds) { return this.client.createGroup(name, participantIds, { autoSendInviteV4: true }); }
+  async updateGroup(chatId, changes) {
+    const group = await this.chat(chatId);
+    if (!group?.isGroup) throw new ReadError('WRITE_FAILED', 'O grupo não está disponível.');
+    if (changes.subject !== undefined) await group.setSubject(changes.subject);
+    if (changes.description !== undefined) await group.setDescription(changes.description);
+    if (changes.messages_admins_only !== undefined) await group.setMessagesAdminsOnly(changes.messages_admins_only);
+    if (changes.info_admins_only !== undefined) await group.setInfoAdminsOnly(changes.info_admins_only);
+  }
+  async manageGroupParticipants(chatId, action, participantIds) {
+    const group = await this.chat(chatId);
+    if (!group?.isGroup) throw new ReadError('WRITE_FAILED', 'O grupo não está disponível.');
+    const method = { add:'addParticipants', remove:'removeParticipants', promote:'promoteParticipants', demote:'demoteParticipants' }[action];
+    if (!method || typeof group[method] !== 'function') throw new ReadError('WRITE_FAILED', 'A ação de grupo não está disponível.');
+    return group[method](participantIds);
+  }
   async logout() {
     if (this.client && this.state === 'ready') {
       try { await this.client.logout(); } catch {}

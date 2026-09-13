@@ -68,3 +68,16 @@ test('entrada MCP real inicia bloqueada, ignora acesso antigo por ambiente e nã
     assert.equal(blocked.isError,true);
   } finally { await client.close(); }
 });
+test('MCP com Writer anuncia leitura e escrita e executa envio idempotente',async()=>{
+  await withClient(async client=>{
+    const result=await client.listTools();
+    assert.deepEqual(result.tools.map(t=>t.name).sort(),[
+      'create_group','get_status','list_chats','manage_group_participants',
+      'read_messages','search_messages','send_message','update_group'
+    ]);
+    const send=await client.callTool({name:'send_message',arguments:{chat_id:GROUP,text:'SIMULADO MCP',idempotency_key:'mcp-send-0001'}});
+    assert.equal(send.isError,undefined);
+    assert.equal(send.structuredContent.ok,true);
+    assert.equal(typeof send.structuredContent.message_id,'string');
+  },['--writer']);
+});

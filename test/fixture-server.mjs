@@ -1,8 +1,14 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from '../src/server.mjs';
 import { Reader } from '../src/core.mjs';
+import { Writer } from '../src/writer.mjs';
 import { fixtures, fixtureAccess } from './fixtures.mjs';
 const provider=fixtures();
 if(process.argv.includes('--fail')) provider.chat=async()=>{throw new Error('SECRET_FIXTURE_DO_NOT_LEAK');};
-const server=createMcpServer(new Reader(provider,{access:fixtureAccess(),cooldownMs:0}));
+const writeMode=process.argv.includes('--writer');
+const scopes=writeMode?['whatsapp.read','whatsapp.send','whatsapp.group.create','whatsapp.group.manage']:null;
+const access=fixtureAccess(undefined,scopes);
+const reader=new Reader(provider,{access,cooldownMs:0});
+const writer=writeMode?new Writer(provider,{access}):null;
+const server=createMcpServer(reader,writer);
 await server.connect(new StdioServerTransport());

@@ -33,6 +33,10 @@ function sendJson(response, statusCode, data, headers = {}) {
 export const SAFE_PUBLIC_ERRORS = {
   ACCESS_NOT_CONFIGURED: { status: 403, error: 'Nenhuma conversa autorizada para esta conta.' },
   ACCESS_REVOKED: { status: 403, error: 'A autorização local mudou. Esta resposta foi descartada.' },
+  WRITE_SCOPE_REQUIRED: { status: 403, error: 'Esta operação de escrita não foi autorizada localmente.' },
+  IDEMPOTENCY_CONFLICT: { status: 409, error: 'A chave de idempotência já foi usada com outros parâmetros.' },
+  INVALID_WRITE_ARGUMENTS: { status: 400, error: 'Confira os IDs, os limites e os campos da operação.' },
+  WRITE_FAILED: { status: 502, error: 'O WhatsApp não confirmou a operação de escrita.' },
   CHAT_NOT_ALLOWED: { status: 403, error: 'Conversa fora da lista local de acesso.' },
   FORBIDDEN: { status: 403, error: 'Acesso negado.' },
   RATE_LIMITED: { status: 429, error: 'Aguarde alguns segundos antes da próxima consulta.' },
@@ -76,7 +80,7 @@ async function parseBody(request, limit = 16384) {
 }
 
 export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
-  return {
+  const spec = {
     openapi: '3.1.0',
     info: {
       title: 'WhatsApp Manutenção — Leitura Segura',
@@ -438,9 +442,24 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
       }
     }
   };
+  spec.info.title = 'WhatsApp Manutenção — Leitura e Escrita Controlada';
+  spec.info.description = 'API para leitura e operações de escrita com allowlist, scopes locais e idempotência.';
+  Object.assign(spec.components.schemas, {
+    SendMessageRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},text:{type:'string',minLength:1,maxLength:4096},idempotency_key:{type:'string',minLength:8,maxLength:128}},required:['chat_id','text','idempotency_key']},
+    CreateGroupRequest:{type:'object',additionalProperties:false,properties:{name:{type:'string',minLength:1,maxLength:100},participant_ids:{type:'array',minItems:1,maxItems:30,items:{type:'string'}},idempotency_key:{type:'string',minLength:8,maxLength:128}},required:['name','participant_ids','idempotency_key']},
+    UpdateGroupRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},subject:{type:'string',minLength:1,maxLength:100},description:{type:'string',maxLength:512},messages_admins_only:{type:'boolean'},info_admins_only:{type:'boolean'}},required:['chat_id']},
+    ManageGroupParticipantsRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},action:{type:'string',enum:['add','remove','promote','demote']},participant_ids:{type:'array',minItems:1,maxItems:30,items:{type:'string'}}},required:['chat_id','action','participant_ids']},
+    WriteResult:{type:'object',properties:{ok:{type:'boolean'},chat_id:{type:['string','null']},group_id:{type:['string','null']},message_id:{type:['string','null']}},required:['ok']}
+  });
+  const writePath=(operationId,summary,schema)=>({post:{operationId,summary,requestBody:{required:true,content:{'application/json':{schema:{$ref:`#/components/schemas/${schema}`}}}},responses:{'200':{description:'Operação concluída.',content:{'application/json':{schema:{$ref:'#/components/schemas/WriteResult'}}}},'400':{description:'Entrada inválida.',content:{'application/json':{schema:{$ref:'#/components/schemas/ErrorResponse'}}}},'403':{description:'Escopo ou conversa não autorizada.',content:{'application/json':{schema:{$ref:'#/components/schemas/ErrorResponse'}}}},'409':{description:'Conflito de idempotência.',content:{'application/json':{schema:{$ref:'#/components/schemas/ErrorResponse'}}}}}}});
+  spec.paths['/gpt/send']=writePath('sendWhatsAppMessage','Envia mensagem para conversa autorizada','SendMessageRequest');
+  spec.paths['/gpt/groups/create']=writePath('createWhatsAppGroup','Cria grupo com autorização específica','CreateGroupRequest');
+  spec.paths['/gpt/groups/update']=writePath('updateWhatsAppGroup','Altera grupo autorizado','UpdateGroupRequest');
+  spec.paths['/gpt/groups/participants']=writePath('manageWhatsAppGroupParticipants','Gerencia participantes do grupo autorizado','ManageGroupParticipantsRequest');
+  return spec;
 }
 
-export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => null, onExternalQuery = () => {} }) {
+export function createGptHandler({ getReader, getWriter = () => null, getGptToken, getPublicUrl = () => null, onExternalQuery = () => {} }) {
   return async (request, response, parsedUrl) => {
     // 1. CORS Preflight
     if (request.method === 'OPTIONS') {
@@ -697,6 +716,22 @@ export function createGptHandler({ getReader, getGptToken, getPublicUrl = () => 
 
         onExternalQuery();
         sendJson(response, 200, responseData);
+        return true;
+      }
+
+      const writeRoute = {
+        '/gpt/send':'send_message',
+        '/gpt/groups/create':'create_group',
+        '/gpt/groups/update':'update_group',
+        '/gpt/groups/participants':'manage_group_participants'
+      }[pathname];
+      if (writeRoute && request.method === 'POST') {
+        const writer=getWriter();
+        if (!writer) throw new ReadError('SERVICE_UNAVAILABLE', 'Serviço de escrita não inicializado.');
+        const input=await parseBody(request);
+        const result=await writer.execute(writeRoute,input);
+        onExternalQuery();
+        sendJson(response,200,result);
         return true;
       }
 
