@@ -44,23 +44,25 @@ async function refresh(){
 
       // Indicadores dos 4 estados
       const waConn=Boolean(state.connected);
-      $('st-wa-dot').style.background=waConn?'#328c62':'#c94a29';
+      $('st-wa-dot').classList.toggle('active',waConn);
+      $('st-wa-dot').classList.toggle('error',!waConn);
       $('st-wa-text').textContent=waConn?'Conectado':'Desconectado';
 
       const authOk=state.allowed_count>0;
-      $('st-auth-dot').style.background=authOk?'#328c62':'#aaa';
+      $('st-auth-dot').classList.toggle('active',authOk);
       $('st-auth-text').textContent=authOk?`${state.allowed_count} liberada${state.allowed_count===1?'':'s'}`:'Pendente';
 
       const tunnelOn=Boolean(state.public_url);
-      $('st-tunnel-dot').style.background=tunnelOn?'#328c62':'#aaa';
+      $('st-tunnel-dot').classList.toggle('active',tunnelOn);
       $('st-tunnel-text').textContent=tunnelOn?'Ativo':'Desativado';
 
       const extOk=Boolean(state.external_query_confirmed);
-      $('st-ext-dot').style.background=extOk?'#328c62':'#aaa';
+      $('st-ext-dot').classList.toggle('active',extOk);
       $('st-ext-text').textContent=extOk?'Confirmada':'Aguardando';
 
       $('toggle-tunnel').textContent=tunnelOn?'Desativar Conexão Remota':'Ativar Conexão Remota';
-      $('toggle-tunnel').className=tunnelOn?'secondary':'primary';
+      $('toggle-tunnel').classList.toggle('secondary',tunnelOn);
+      $('toggle-tunnel').classList.toggle('primary',!tunnelOn);
       $('copy-gpt-schema').hidden=!tunnelOn;
       $('tunnel-info').hidden=!tunnelOn;
       if(tunnelOn)$('tunnel-url-display').textContent=state.public_url;

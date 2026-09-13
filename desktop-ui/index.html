@@ -13,27 +13,27 @@
 <section id="pairing" hidden><p class="eyebrow">AUTORIZE NO SEU CELULAR</p><h1>Escaneie para conectar.</h1><div class="pair-grid"><div class="qr"><img id="qr-image" alt="QR code para conectar seu WhatsApp" width="280" height="280"></div><ol class="pair-steps"><li>Abra o <strong>WhatsApp</strong> no celular.</li><li>Entre em <strong>Aparelhos conectados</strong>.</li><li>Toque em <strong>Conectar um aparelho</strong> e escaneie este código.</li></ol></div><p class="muted">O código é pessoal e temporário. Mantenha esta tela aberta enquanto conecta.</p><button class="secondary block">Cancelar</button></section>
 <section id="choose" hidden><p class="eyebrow">ESCOLHA O QUE COMPARTILHAR</p><h1>Quais conversas<br>o assistente pode ler?</h1><p class="lead compact">Marque até 30 conversas. Você poderá alterar a seleção depois.</p><label class="search"><span>⌕</span><input id="filter" type="search" placeholder="Buscar grupo ou contato" autocomplete="off" aria-label="Buscar conversa"></label><div id="chat-list" class="chat-list" role="group" aria-label="Conversas disponíveis"></div><div class="selection-footer"><span id="selection-count">Nenhuma selecionada</span><button id="authorize" class="primary" disabled>Autorizar seleção <span>→</span></button></div><button class="text-button block">Manter tudo bloqueado</button></section>
 <section id="ready" hidden><p class="eyebrow">TUDO CONFIGURADO</p><div class="success-mark">✓</div><h1>Pronto para<br>o ChatGPT.</h1><p class="lead"><strong id="allowed-count">0 conversas</strong> autorizadas neste computador.</p>
-<div class="status-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;">
-  <div class="status-card" style="background:#eaf1e7;padding:12px;border-radius:8px;border:1px solid #d4dfd1;font-size:12px;"><i id="st-wa-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#328c62;margin-right:6px;"></i><strong>WhatsApp:</strong> <span id="st-wa-text">Conectado</span></div>
-  <div class="status-card" style="background:#eaf1e7;padding:12px;border-radius:8px;border:1px solid #d4dfd1;font-size:12px;"><i id="st-auth-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#328c62;margin-right:6px;"></i><strong>Autorização:</strong> <span id="st-auth-text">Configurada</span></div>
-  <div class="status-card" style="background:#eaf1e7;padding:12px;border-radius:8px;border:1px solid #d4dfd1;font-size:12px;"><i id="st-tunnel-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#aaa;margin-right:6px;"></i><strong>Acesso Remoto:</strong> <span id="st-tunnel-text">Desativado</span></div>
-  <div class="status-card" style="background:#eaf1e7;padding:12px;border-radius:8px;border:1px solid #d4dfd1;font-size:12px;"><i id="st-ext-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#aaa;margin-right:6px;"></i><strong>Consulta Externa:</strong> <span id="st-ext-text">Pendente</span></div>
+<div class="status-grid">
+  <div class="status-card"><i id="st-wa-dot" class="status-dot active"></i><strong>WhatsApp:</strong> <span id="st-wa-text">Conectado</span></div>
+  <div class="status-card"><i id="st-auth-dot" class="status-dot active"></i><strong>Autorização:</strong> <span id="st-auth-text">Configurada</span></div>
+  <div class="status-card"><i id="st-tunnel-dot" class="status-dot"></i><strong>Acesso Remoto:</strong> <span id="st-tunnel-text">Desativado</span></div>
+  <div class="status-card"><i id="st-ext-dot" class="status-dot"></i><strong>Consulta Externa:</strong> <span id="st-ext-text">Pendente</span></div>
 </div>
-<div class="next-step"><b>ChatGPT para Windows (Aplicativo Desktop):</b><p>Abra o ChatGPT para Windows. Comece uma nova conversa e peça para consultar seu WhatsApp.</p><div class="connection-status"><i id="mcp-dot"></i><span id="mcp-status">Aguardando o ChatGPT reconhecer a conexão</span></div><button id="copy-prompt" class="primary" style="margin-top:12px;padding:8px 14px;font-size:12px;">Copiar pedido de teste</button></div>
-<div class="gpt-card" style="margin-top:16px;padding:16px;background:#ffffff;border-radius:10px;border:1px solid #d8e2d6;">
-  <strong style="display:block;margin-bottom:6px;font-size:14px;">Usar no Celular e Navegador (ChatGPT Custom GPT)</strong>
-  <p class="muted" style="margin-top:4px;margin-bottom:12px;font-size:12px;line-height:1.5;">Ative a conexão remota criptografada para consultar pelo celular (iOS/Android) ou em chatgpt.com sem expor seu IP ou abrir portas.</p>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-    <button id="toggle-tunnel" class="primary" style="margin-top:0;font-size:12px;padding:8px 14px;">Ativar Conexão Remota</button>
-    <button id="copy-gpt-schema" class="secondary" style="font-size:12px;padding:8px 14px;" hidden>Copiar URL do Schema</button>
-    <button id="copy-gpt-token" class="secondary" style="font-size:12px;padding:8px 14px;">Copiar Chave do GPT</button>
+<div class="next-step"><b>ChatGPT para Windows (Aplicativo Desktop):</b><p>Abra o ChatGPT para Windows. Comece uma nova conversa e peça para consultar seu WhatsApp.</p><div class="connection-status"><i id="mcp-dot"></i><span id="mcp-status">Aguardando o ChatGPT reconhecer a conexão</span></div><button id="copy-prompt" class="primary copy-prompt">Copiar pedido de teste</button></div>
+<div class="gpt-card">
+  <strong class="gpt-heading">Usar no Celular e Navegador (ChatGPT Custom GPT)</strong>
+  <p class="muted gpt-description">Ative a conexão remota criptografada para consultar pelo celular (iOS/Android) ou em chatgpt.com sem expor seu IP ou abrir portas.</p>
+  <div class="gpt-actions">
+    <button id="toggle-tunnel" class="primary tunnel-toggle compact-button">Ativar Conexão Remota</button>
+    <button id="copy-gpt-schema" class="secondary compact-button" hidden>Copiar URL do Schema</button>
+    <button id="copy-gpt-token" class="secondary compact-button">Copiar Chave do GPT</button>
   </div>
-  <div id="tunnel-info" style="margin-top:10px;font-size:11px;color:#61766a;" hidden>
-    <strong>URL Pública Ativa:</strong> <span id="tunnel-url-display" style="word-break:break-all;"></span><br>
-    <small style="color:#88998c;">Nota: O Quick Tunnel (trycloudflare.com) é temporário. Caso deseje um endereço permanente, configure um túnel nomeado com domínio próprio na Cloudflare.</small>
+  <div id="tunnel-info" hidden class="tunnel-info">
+    <strong>URL Pública Ativa:</strong> <span id="tunnel-url-display" class="tunnel-url"></span><br>
+    <small class="tunnel-note">Nota: O Quick Tunnel (trycloudflare.com) é temporário. Caso deseje um endereço permanente, configure um túnel nomeado com domínio próprio na Cloudflare.</small>
   </div>
 </div>
-<div class="actions" style="margin-top:18px;">
+<div class="actions ready-actions">
   <button id="edit" class="secondary">Alterar conversas</button>
   <button id="switch-account" class="secondary">Trocar de número</button>
   <button class="danger block">Bloquear acesso</button>

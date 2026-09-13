@@ -2,7 +2,7 @@
 
 Aplicativo local para permitir ao ChatGPT (no Windows Desktop, Navegador Web e Celular) consultar conversas do WhatsApp previamente autorizadas pelo usuário com controle estrito de privacidade.
 
-**Estado: Versão 0.3.0 concluída, empacotada e homologada no Windows x64.** O executável único standalone (`whatsapp-manutencao.exe`), o suporte híbrido a MCP local (Desktop) e Custom GPT Actions (Web e Mobile), o túnel Cloudflare gerenciado com integridade criptográfica, a proteção de pastas NTFS e a automação de testes foram implementados e validados.
+**Estado atual: candidato 0.3.0-r3 em revisão, com validação de pareamento no computador do usuário pendente.** Esta revisão recupera a navegação durante a injeção do WhatsApp Web, preserva a sessão ao desconectar e remove estilos incompatíveis com a CSP. Os resultados anteriores abaixo são históricos; consulte o PR da branch `fix/pairing-navigation-recovery` para o CI desta revisão. Um processo iniciado ou um executável compilado não comprovam pareamento funcional.
 
 ## Experiência do Usuário
 
@@ -65,4 +65,3 @@ py -3 scripts/package.py
 Artefatos gerados na pasta `dist/`:
 - `dist/whatsapp-manutencao.exe`: Executável standalone Windows x64 pronto para uso.
 - `dist/whatsapp-manutencao-windows-x64.zip`: Pacote de distribuição com executável e documentação.
-

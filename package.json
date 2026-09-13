@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node scripts/desktop-stdio.mjs",
-    "test": "node --test test/core.test.mjs test/desktop.test.mjs test/mcp.test.mjs test/security.test.mjs test/gpt.test.mjs"
+    "test": "node --test test/core.test.mjs test/desktop.test.mjs test/mcp.test.mjs test/security.test.mjs test/gpt.test.mjs test/browser-navigation.test.mjs test/desktop-csp.test.mjs",
+    "test:browser": "node --test --test-timeout=60000 test/browser-integration.test.mjs"
   },
   "overrides": {
     "whatsapp-web.js": {

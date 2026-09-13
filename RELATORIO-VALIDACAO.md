@@ -77,3 +77,27 @@ Os arquivos foram gerados e validados no sistema local via `scripts/package.py`:
 1. **Validação com Aparelho Físico Real:** As correções foram homologadas com a suíte automatizada completa (80 testes cobrindo todos os fluxos de integração com dados simulados e provedores em memória). O teste de pareamento com escaneamento de QR Code de um telefone físico real depende de ação interativa do usuário com a câmera do celular.
 2. **Continuidade de Quick Tunnels:** O modo padrão utiliza `trycloudflare.com`, que gera URLs efêmeras por sessão. Para ambientes de produção com endereço permanente, o usuário deve informar `CLOUDFLARE_TUNNEL_TOKEN`.
 3. **Limite de Payload do ChatGPT:** O teto de 32 KB por resposta é estritamente aplicado pelo aplicativo para evitar rejeições pela OpenAI; buscas muito extensas retornam até 30 itens ordenados cronologicamente com sinalização clara de corte (`truncated: true`).
+
+## Revisão 0.3.0-r3 — recuperação de navegação (13/09/2026)
+
+Esta revisão parte exatamente de `95a1c01cba71fd008ea94bff67635f999177c413` na branch `fix/pairing-navigation-recovery`. O PR #5 permanece sem merge. As declarações e hashes das seções anteriores são históricos e não validam este candidato.
+
+O `Client.initialize()` do whatsapp-web.js 1.34.7 chama `inject()` após `page.goto()`. O início de `inject()` consulta `window.Debug` por `evaluate()`, que pode perder o contexto quando o documento navega outra vez. O wrapper anterior no provider descartava qualquer `Protocol error`; o serviço também descartava rejeições de listeners assíncronos.
+
+A recuperação agora espera `document.readyState` e `window.Debug.VERSION` com `waitForFunction()`, repete somente `Execution context was destroyed`, limita a execução a três tentativas e 30 segundos totais, compartilha uma Promise e libera os handles. Cancelar o provider interrompe a espera; o bloqueio de concorrência permanece até a operação subjacente terminar. Erros de protocolo, rede, autenticação e fechamento inesperado são propagados pelo helper sem registrar seus conteúdos. Erros públicos permanecem sanitizados.
+
+Desconectar preserva a sessão; logout e limpeza ficam somente na troca explícita de conta. Foram removidas a exclusão automática de lockfiles e a tentativa de encerrar Chrome por PID através de PowerShell. O fallback atua apenas no ChildProcess vivo retornado pelo próprio Puppeteer. A assinatura Google do Chrome continua obrigatória no Windows. Estilos inline foram transferidos para CSS e os indicadores usam classes, mantendo a CSP estrita. A descoberta e a sondagem exigem `build_id: 0.3.0-r3`.
+
+Validações executadas no ambiente Linux desta revisão:
+
+- `npm ci --ignore-scripts --no-audit --no-fund`: aprovado, 217 dependências instaladas pelo lockfile.
+- `node --test test/browser-navigation.test.mjs test/desktop-csp.test.mjs`: 22 aprovados, zero falhas e zero skips.
+- Teste de desconexão com arquivo de sessão sintético: aprovado; o arquivo foi preservado, logout não foi chamado e nova tentativa foi permitida.
+- `npm test`: executado, mas não aprovado localmente. As integrações dependentes de sockets encontram `listen EPERM` no sandbox, incluindo F03 e comunicação da URL pública. A execução permaneceu aberta após essas falhas e foi interrompida; não há contagem de conclusão local. A política automática recusou execução fora do sandbox. Esses testes continuam obrigatórios no Windows do CI, sem novos skips ou redução das asserções.
+- `go test -v ./...`: quatro testes aprovados com Go 1.27.1 Linux amd64.
+- Build cruzado do launcher com `GOOS=windows GOARCH=amd64`: aprovado; formato PE32+ GUI x86-64 confirmado. Isso ainda não é o pacote standalone.
+- Verificações estáticas: zero atributos `style=` no HTML, zero mutações `.style` no app.js, CSP sem `unsafe-inline`/`unsafe-eval` e `git diff --check` aprovado.
+
+O workflow Windows executa novamente `npm test`, os quatro testes de navegador real com páginas sintéticas, os testes Go, compilação, empacotamento e upload. O teste de navegador força uma navegação real durante `page.evaluate()`, testa navegação durante `waitForFunction()`, cancelamento e eventos CSP em todos os estados da interface. Não conecta ao WhatsApp nem acessa perfis, conversas ou configuração real do ChatGPT.
+
+A instalação no dispositivo do usuário e duas tentativas consecutivas com QR real permanecem pendentes: Remote Desktop Commander não estava instalado/conectado nesta sessão. Nenhuma sessão, QR, conversa, token ou processo do Windows do usuário foi acessado. A aprovação do CI, o artefato e seus hashes serão registrados no PR depois da execução; só esse artefato poderá ser considerado para instalação. Não considerar o produto funcional até a validação no dispositivo e o pareamento solicitado.

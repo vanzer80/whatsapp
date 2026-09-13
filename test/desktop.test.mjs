@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,readFileSync,writeFileSync,readdirSync,symlinkSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,rmSync,readFileSync,writeFileSync,readdirSync,symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -131,6 +131,30 @@ test('QR local é uma imagem vetorial sem incorporar o texto original',()=>{
   const svg=qrSvg('<script>TESTE_SIMULADO</script>');
   assert.match(svg,/^<svg /);assert.doesNotMatch(svg,/script|TESTE_SIMULADO|https:/);
   assert.throws(()=>qrSvg('x'.repeat(4097)));
+});
+
+test('disconnect preserves the session, skips logout and permits another pairing attempt',async t=>{
+  const {control,providers,directory}=controller(t);
+  const oldLocalAppData=process.env.LOCALAPPDATA;
+  process.env.LOCALAPPDATA=directory;
+  t.after(()=>{if(oldLocalAppData===undefined)delete process.env.LOCALAPPDATA;else process.env.LOCALAPPDATA=oldLocalAppData;});
+  const session=path.join(directory,'WhatsAppManutencaoSegura','session-maintenance');
+  mkdirSync(session,{recursive:true});
+  const sentinel=path.join(session,'synthetic-session');writeFileSync(sentinel,'SYNTHETIC');
+  await control.connect(); await tick();
+  let logouts=0;
+  providers[0].logout=async()=>{logouts++;};
+  await control.disconnect();
+  assert.equal(logouts,0);assert.equal(providers[0].closed,true);
+  assert.equal(readFileSync(sentinel,'utf8'),'SYNTHETIC');
+  assert.equal(control.phase,'welcome');assert.equal(control.provider,null);
+  providers[0].opts.onQr('STALE_SYNTHETIC_QR');
+  assert.equal(control.qr,null);
+  await control.connect();await tick();
+  assert.equal(providers.length,2);
+  providers[1].opts.onQr('NEW_SYNTHETIC_QR');
+  assert.equal(control.phase,'pairing');
+  assert.equal(Boolean(control.status().qr_svg),true);
 });
 
 class AuthClientTransport {

@@ -103,19 +103,18 @@ export class DesktopController {
     } finally {this.changing=false;}
   }
   async disconnect() {
-    const generation=++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
     const provider=this.provider;this.provider=null;
     try {this.revoke();}
     finally {
       if(provider) {
         try {
-          if(typeof provider.logout==='function')await provider.logout();
-          else await provider.close();
+          await provider.close();
         } catch {}
       }
     }
-    if(generation!==this.generation)return;
-    clearSessionMaintenance();
+    // Disconnect cancels this attempt without deleting LocalAuth data. Only an
+    // explicit account switch logs out and clears session-maintenance.
   }
   async switchAccount() {
     if(this.changing)throw new Error('Aguarde a operação atual.');

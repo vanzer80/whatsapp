@@ -6,9 +6,11 @@ on:
       - main
       - feat/*
       - release/*
+      - fix/*
   pull_request:
     branches:
       - main
+      - feat/windows-release-ci
 
 jobs:
   build:
@@ -41,6 +43,9 @@ jobs:
 
       - name: Run Node test suite
         run: npm test
+
+      - name: Validate navigation recovery and CSP in real Chromium with synthetic data
+        run: npm run test:browser
 
       - name: Test Go Launcher
         working-directory: ./launcher
