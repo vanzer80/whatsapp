@@ -12,7 +12,8 @@ export function readDiscovery() {
     const d=readPrivateJson(serviceFile());
     if(d.version!=='0.3.0'||!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(d.origin)||
        !/^[a-f0-9]{64}$/.test(d.ui_token)||!/^[a-f0-9]{64}$/.test(d.ipc_token)||
-       !Number.isSafeInteger(d.pid)||d.pid<1||typeof d.pipe!=='string'||d.executable!==launcherPath())return null;
+       !Number.isSafeInteger(d.pid)||d.pid<1||typeof d.pipe!=='string')return null;
+    if(d.executable!==launcherPath() && path.basename(d.executable).toLowerCase()!=='whatsapp-manutencao.exe')return null;
     if(process.platform==='win32'&&!/^\\\\\.\\pipe\\WhatsAppManutencao-[a-f0-9-]{36}$/.test(d.pipe))return null;
     if(process.platform!=='win32'&&path.dirname(d.pipe)!==dataDirectory())return null;
     return d;
@@ -20,14 +21,39 @@ export function readDiscovery() {
 }
 export async function running() {
   const d=readDiscovery();if(!d)return null;
-  try {const r=await fetch(d.origin+'/api/status',{headers:{Authorization:`Bearer ${d.ui_token}`},redirect:'error',signal:AbortSignal.timeout(1500)});
-    if(!r.ok)return null;const state=await r.json();return state.version==='0.3.0'?d:null;
+  try {
+    const r=await fetch(d.origin+'/api/status',{headers:{Authorization:`Bearer ${d.ui_token}`},redirect:'error',signal:AbortSignal.timeout(1500)});
+    if(!r.ok)return null;
+    const state=await r.json();
+    if(state.version!=='0.3.0'||state.build_id!=='0.3.0-r2')return null;
+    if(!Array.isArray(state.capabilities)||!state.capabilities.includes('mcp_reader')||!state.capabilities.includes('gpt_actions'))return null;
+    return d;
   }catch{return null;}
 }
 export async function ensureRunning() {
-  secureDirectory();const existing=await running();if(existing)return existing;
+  secureDirectory();
+  const existing=await running();
+  if(existing)return existing;
+  const oldDisc=readDiscovery();
+  if(oldDisc?.origin && oldDisc?.ui_token) {
+    try {
+      await fetch(oldDisc.origin+'/api/shutdown',{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:`Bearer ${oldDisc.ui_token}`},
+        body:'{}',
+        redirect:'error',
+        signal:AbortSignal.timeout(1500)
+      });
+      await new Promise(resolve=>setTimeout(resolve,300));
+    } catch {}
+  }
+  const env=minimalEnvironment();
+  if (process.platform === 'win32') {
+    const sysRoot=env.SystemRoot||env.WINDIR||'C:\\Windows';
+    env.PATH=`${sysRoot}\\System32;${sysRoot}`;
+  }
   const child=spawn(process.execPath,[path.join(releaseRoot,'scripts/desktop-service.mjs')],{
-    cwd:releaseRoot,env:minimalEnvironment(),windowsHide:true,detached:true,stdio:'ignore'
+    cwd:releaseRoot,env,windowsHide:true,detached:true,stdio:'ignore'
   });
   let spawnError=false;child.once('error',()=>{spawnError=true;});child.unref();
   const until=Date.now()+35000;

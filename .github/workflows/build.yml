@@ -1,0 +1,74 @@
+name: Build and Release Windows x64
+
+on:
+  push:
+    branches:
+      - main
+      - feat/*
+      - release/*
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build & Package Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go 1.23+
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.23'
+          cache: false
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run Node test suite
+        run: npm test
+
+      - name: Test Go Launcher
+        working-directory: ./launcher
+        run: go test -v ./...
+
+      - name: Compile Go Launcher executable
+        working-directory: ./launcher
+        run: |
+          mkdir -p ../dist
+          go build -ldflags="-H windowsgui -s -w" -o ../dist/whatsapp-manutencao.exe .
+
+      - name: Package Standalone Windows x64 Executable and Release ZIP
+        run: python scripts/package.py
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path dist
+          if (-not (Test-Path "dist/whatsapp-manutencao.exe")) { throw "dist/whatsapp-manutencao.exe not found" }
+          if (-not (Test-Path "dist/whatsapp-manutencao-windows-x64.zip")) { throw "dist/whatsapp-manutencao-windows-x64.zip not found" }
+          Write-Host "Build artifacts verified successfully."
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatsapp-manutencao-windows-x64
+          path: |
+            dist/whatsapp-manutencao.exe
+            dist/whatsapp-manutencao-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30

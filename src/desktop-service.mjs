@@ -8,6 +8,8 @@ import { createMcpServer } from './server.mjs';
 import { DesktopController } from './desktop-controller.mjs';
 import { registerLocal, registrationStatus } from './desktop-registration.mjs';
 import { dataDirectory, secureDirectory, writePrivateJson } from './local-security.mjs';
+import { createGptHandler } from './gpt-handler.mjs';
+import { getOrCreateGptToken, CloudflareTunnelManager } from './gpt-tunnel.mjs';
 
 const equal=(a,b)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 export class PipeTransport {
@@ -51,25 +53,53 @@ async function body(request) {
   if(!result||Array.isArray(result)||typeof result!=='object')throw new Error('Solicitação inválida.');
   return result;
 }
-export function createWebHandler(controller,connection,register=()=>{}) {
+export function createWebHandler(controller,connection,register=()=>{},gptHandler=null,tunnelManager=null,onShutdown=null) {
   return async(request,response)=>{
     const {origin,uiToken}=connection;
+    let pathname,parsedUrl;
+    try {
+      parsedUrl=new URL(request.url,origin||`http://${request.headers.host||'127.0.0.1'}`);
+      pathname=parsedUrl.pathname;
+    } catch {
+      send(response,400,{error:'Solicitação inválida.'});return;
+    }
+
+    if(pathname.startsWith('/gpt/')) {
+      if(gptHandler) {
+        const handled=await gptHandler(request,response,parsedUrl);
+        if(handled)return;
+      }
+      send(response,404,{error:'Ação não encontrada.'});return;
+    }
+
     response.setHeader('Cache-Control','no-store');response.setHeader('X-Content-Type-Options','nosniff');
     response.setHeader('Referrer-Policy','no-referrer');response.setHeader('X-Frame-Options','DENY');
     response.setHeader('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
     if(request.headers.host!==new URL(origin).host || (request.headers.origin&&request.headers.origin!==origin)) {send(response,403,{error:'Origem não autorizada.'});return;}
-    let pathname;try{pathname=new URL(request.url,origin).pathname;}catch{send(response,400,{error:'Solicitação inválida.'});return;}
     if(request.method==='GET'&&assets.has(pathname)) {
       const file=assets.get(pathname);response.writeHead(200,{'Content-Type':mime[path.extname(file)]});
       response.end(readFileSync(new URL(`../desktop-ui/${file}`,import.meta.url)));return;
     }
     if(!pathname.startsWith('/api/')||!equal(request.headers.authorization,`Bearer ${uiToken}`)) {send(response,403,{error:'Abra o aplicativo pelo ícone WhatsApp Manutenção.'});return;}
     try {
-      if(request.method==='GET'&&pathname==='/api/status') {send(response,200,{...controller.status(),registered:connection.registered,last_mcp_seen:connection.lastMcpSeen});return;}
+      if(request.method==='GET'&&pathname==='/api/status') {
+        send(response,200,{
+          ...controller.status(),
+          registered:connection.registered,
+          last_mcp_seen:connection.lastMcpSeen,
+          gpt_token:connection.gptToken,
+          public_url:connection.publicUrl,
+          tunnel_active:Boolean(connection.tunnelActive && connection.publicUrl),
+          external_query_confirmed:Boolean(connection.externalQueryConfirmed),
+          capabilities:connection.capabilities,
+          build_id:connection.build_id
+        });
+        return;
+      }
       if(request.method==='GET'&&pathname==='/api/chats') {send(response,200,{chats:controller.phase==='choose'?controller.choices:[]});return;}
       if(request.method!=='POST'){send(response,404,{error:'Ação não encontrada.'});return;}
       const input=await body(request);
-      if(pathname!=='/api/authorize'&&Object.keys(input).length)throw new Error('Solicitação inválida.');
+      if(!['/api/authorize','/api/tunnel','/api/shutdown'].includes(pathname)&&Object.keys(input).length)throw new Error('Solicitação inválida.');
       if(pathname==='/api/setup') {register();connection.registered=true;await controller.connect();}
       else if(pathname==='/api/connect')await controller.connect();
       else if(pathname==='/api/edit')await controller.edit();
@@ -78,20 +108,74 @@ export function createWebHandler(controller,connection,register=()=>{}) {
         await controller.authorize(input.chat_ids);
       }
       else if(pathname==='/api/block')await controller.block();
+      else if(pathname==='/api/disconnect')await controller.disconnect();
+      else if(pathname==='/api/switch-account')await controller.switchAccount();
+      else if(pathname==='/api/shutdown') {
+        send(response,200,{ok:true});
+        if(onShutdown)setTimeout(()=>onShutdown(),50);
+        return;
+      }
+      else if(pathname==='/api/tunnel/start') {
+        if(!tunnelManager)throw new Error('Gerenciador de túnel indisponível.');
+        const port=new URL(origin).port;
+        const res=await tunnelManager.start({localPort:port});
+        connection.publicUrl=res.url;
+        connection.tunnelActive=true;
+        send(response,200,{ok:true,url:res.url});
+        return;
+      }
+      else if(pathname==='/api/tunnel/stop') {
+        if(tunnelManager)tunnelManager.stop();
+        connection.publicUrl=null;
+        connection.tunnelActive=false;
+        send(response,200,{ok:true});
+        return;
+      }
+      else if(pathname==='/api/tunnel') {
+        if(typeof input.url!=='string'||!/^https:\/\/[a-zA-Z0-9-.]+\.[a-zA-Z]{2,}(?::\d+)?$/.test(input.url)) {
+          throw new Error('URL de túnel HTTPS válida é obrigatória.');
+        }
+        connection.publicUrl=input.url;
+        connection.tunnelActive=true;
+        send(response,200,{ok:true,url:input.url});
+        return;
+      }
       else {send(response,404,{error:'Ação não encontrada.'});return;}
       send(response,200,{ok:true});
     } catch(error) {
-      const allowed=/^(Selecione|Conecte|Aguarde|A seleção|Uma conversa|A conexão mudou|Já existe uma conexão|A configuração|O registro|Caminho do aplicativo)/;
+      const allowed=/^(Selecione|Conecte|Aguarde|A seleção|Uma conversa|A conexão mudou|Já existe uma conexão|A configuração|O registro|Caminho do aplicativo|URL de túnel|O túnel)/;
       send(response,400,{error:allowed.test(error.message)?error.message:'Não foi possível concluir esta etapa. Tente novamente pelo aplicativo.'});
     }
   };
 }
 export async function startDesktopService({controller=new DesktopController(),directory=dataDirectory(),executable,
-  register=()=>registerLocal(executable),isRegistered=()=>registrationStatus(executable),writeDiscovery=true}={}) {
+  register=()=>registerLocal(executable),isRegistered=()=>registrationStatus(executable),writeDiscovery=true,
+  tunnelUrl=null}={}) {
   secureDirectory(directory);
-  const uiToken=randomBytes(32).toString('hex'),ipcToken=randomBytes(32).toString('hex');
+  const uiToken=randomBytes(32).toString('hex'),ipcToken=randomBytes(32).toString('hex'),gptToken=getOrCreateGptToken(directory);
   const pipe=process.platform==='win32'?`\\\\.\\pipe\\WhatsAppManutencao-${randomUUID()}`:path.join(directory,`ipc-${randomUUID().slice(0,12)}.sock`);
-  const connection={uiToken,registered:isRegistered(),lastMcpSeen:null,origin:null};
+  const connection={
+    uiToken,
+    ipcToken,
+    gptToken,
+    registered:isRegistered(),
+    lastMcpSeen:null,
+    origin:null,
+    publicUrl:tunnelUrl,
+    externalQueryConfirmed:false,
+    capabilities:['mcp_reader','gpt_actions'],
+    build_id:'0.3.0-r2'
+  };
+  const tunnelManager=new CloudflareTunnelManager({directory});
+  tunnelManager.onUrlChange=url=>{connection.publicUrl=url;};
+  tunnelManager.onClose=()=>{connection.publicUrl=null;};
+
+  const gptHandler=createGptHandler({
+    getReader:()=>controller.reader,
+    getGptToken:()=>connection.gptToken,
+    getPublicUrl:()=>connection.publicUrl||null,
+    onExternalQuery:()=>{connection.externalQueryConfirmed=true;}
+  });
   const connections=new Set();let closed=false,origin;
   const pipeServer=net.createServer(socket=>{
     socket.setNoDelay(true);connections.add(socket);socket.once('close',()=>connections.delete(socket));
@@ -100,7 +184,8 @@ export async function startDesktopService({controller=new DesktopController(),di
     server.connect(new PipeTransport(socket,ipcToken)).catch(()=>socket.destroy());
   });
   pipeServer.maxConnections=20;
-  const web=http.createServer(createWebHandler(controller,connection,register));
+  let serviceHandle;
+  const web=http.createServer(createWebHandler(controller,connection,register,gptHandler,tunnelManager,()=>serviceHandle?.close()));
   web.maxConnections=50;web.maxHeadersCount=30;web.requestTimeout=10000;web.headersTimeout=10000;web.keepAliveTimeout=5000;
   const discoveryFile=path.join(directory,'desktop-service.json');
   let discovery;
@@ -109,7 +194,18 @@ export async function startDesktopService({controller=new DesktopController(),di
     if(process.platform!=='win32')chmodSync(pipe,0o600);
     await new Promise((resolve,reject)=>{web.once('error',reject);web.listen(0,'127.0.0.1',resolve);});
     origin=`http://127.0.0.1:${web.address().port}`;connection.origin=origin;
-    discovery={version:'0.3.0',pid:process.pid,origin,ui_token:uiToken,ipc_token:ipcToken,pipe,executable};
+    discovery={
+      version:'0.3.0',
+      build_id:connection.build_id,
+      capabilities:connection.capabilities,
+      pid:process.pid,
+      origin,
+      ui_token:uiToken,
+      ipc_token:ipcToken,
+      gpt_token:gptToken,
+      pipe,
+      executable
+    };
     if(writeDiscovery)writePrivateJson(discoveryFile,discovery);
   } catch(error) {
     for(const socket of connections)socket.destroy();
@@ -121,11 +217,20 @@ export async function startDesktopService({controller=new DesktopController(),di
     if(controller.phase==='ready' && (!controller.provider?.status().connected || !controller.access.snapshot(controller.provider?.accountId())))
       void controller.block().catch(()=>controller.close());
   },1500);monitor.unref();
-  return {discovery,controller,async close(){
-    if(closed)return;closed=true;clearInterval(monitor);await controller.close();
-    for(const socket of connections)socket.destroy();
-    await Promise.all([new Promise(resolve=>pipeServer.close(resolve)),new Promise(resolve=>{web.closeAllConnections();web.close(resolve);})]);
-    if(writeDiscovery&&existsSync(discoveryFile))unlinkSync(discoveryFile);
-    if(process.platform!=='win32'&&existsSync(pipe))unlinkSync(pipe);
-  }};
+  serviceHandle = {
+    discovery,
+    controller,
+    tunnelManager,
+    connection,
+    async close(){
+      if(closed)return;closed=true;clearInterval(monitor);
+      tunnelManager.stop();
+      await controller.close();
+      for(const socket of connections)socket.destroy();
+      await Promise.all([new Promise(resolve=>pipeServer.close(resolve)),new Promise(resolve=>{web.closeAllConnections();web.close(resolve);})]);
+      if(writeDiscovery&&existsSync(discoveryFile))unlinkSync(discoveryFile);
+      if(process.platform!=='win32'&&existsSync(pipe))unlinkSync(pipe);
+    }
+  };
+  return serviceHandle;
 }

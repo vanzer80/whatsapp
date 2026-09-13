@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { Reader } from './core.mjs';
 import { AccessStore, savePolicy, validChatId } from './access.mjs';
 import { writePrivateJson } from './local-security.mjs';
-import { WhatsAppProvider, chromePath } from './provider.mjs';
+import { WhatsAppProvider, chromePath, clearSessionMaintenance } from './provider.mjs';
 
 const require=createRequire(import.meta.url);
 const QRCode=require('qrcode-terminal/vendor/QRCode');
@@ -46,7 +46,8 @@ export class DesktopController {
       this.error=null;this.qr=null;this.choices=[];this.phase='connecting';
       const provider=this.providerFactory({pairing:interactive,headless:true,
         onQr:qr=>{if(generation===this.generation){this.qr=qr;this.phase='pairing';}},
-        onReady:()=>{void this.ready(provider,generation,interactive).catch(()=>this.fail(generation));}
+        onReady:()=>{void this.ready(provider,generation,interactive).catch(()=>this.fail(generation));},
+        onDisconnected:()=>{if(generation===this.generation)this.fail(generation,'A sessão do WhatsApp foi desconectada. Clique em Tentar novamente para conectar.');}
       });
       this.provider=provider;
       clearTimeout(this.timer);
@@ -100,6 +101,40 @@ export class DesktopController {
       if(generation!==this.generation || provider!==this.provider || account!==provider.accountId() || !provider.status().connected)throw new Error('A conexão mudou. Selecione novamente.');
       savePolicy(account,ids,this.access.file);this.choices=[];this.phase='ready';
     } finally {this.changing=false;}
+  }
+  async disconnect() {
+    const generation=++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    const provider=this.provider;this.provider=null;
+    try {this.revoke();}
+    finally {
+      if(provider) {
+        try {
+          if(typeof provider.logout==='function')await provider.logout();
+          else await provider.close();
+        } catch {}
+      }
+    }
+    if(generation!==this.generation)return;
+    clearSessionMaintenance();
+  }
+  async switchAccount() {
+    if(this.changing)throw new Error('Aguarde a operação atual.');
+    this.changing=true;
+    const generation=++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='welcome';
+    const provider=this.provider;this.provider=null;
+    try {
+      this.revoke();
+      if(provider) {
+        try {
+          if(typeof provider.logout==='function')await provider.logout();
+          else await provider.close();
+        } catch {}
+      }
+      if(generation!==this.generation)return;
+      clearSessionMaintenance();
+    } finally {this.changing=false;}
+    if(generation!==this.generation)return;
+    await this.connect({interactive:true});
   }
   async block() {
     ++this.generation;clearTimeout(this.timer);this.qr=null;this.choices=[];this.phase='blocked';

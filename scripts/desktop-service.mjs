@@ -1,5 +1,12 @@
 import { minimalEnvironment } from '../src/local-security.mjs';
 const safe=minimalEnvironment();for(const key of Object.keys(process.env))if(!(key in safe))delete process.env[key];
+if (process.platform === 'win32') {
+  const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  process.env.PATH = `${sysRoot}\\System32;${sysRoot}`;
+}
+process.on('unhandledRejection', reason => {
+  if (reason?.name === 'TargetCloseError' || reason?.message?.includes('Target closed') || reason?.message?.includes('Protocol error')) return;
+});
 let unlock,service;
 try {
   const {acquireLock,launcherPath}=await import('../src/desktop-process.mjs');

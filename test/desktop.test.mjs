@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync,readFileSync,writeFileSync,readdirSync,symlinkSync} f
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 import {once} from 'node:events';
 import {Readable,duplexPair} from 'node:stream';
 import {randomBytes} from 'node:crypto';
@@ -26,8 +27,8 @@ test('registro preserva o texto e os valores de outras configurações do ChatGP
   const next=registrationText(original,executable);
   assert.ok(next.startsWith(original));
   const parsed=parse(next);
-  assert.deepEqual(parsed.mcp_servers['whatsapp-manutencao'],{command:executable,args:['--mcp'],enabled:true,startup_timeout_sec:45,tool_timeout_sec:90});
-  delete parsed.mcp_servers['whatsapp-manutencao'];
+  assert.deepEqual(parsed.mcp_servers['whatsapp_manutencao'],{command:executable,args:['--mcp'],enabled:true,startup_timeout_sec:45,tool_timeout_sec:90});
+  delete parsed.mcp_servers['whatsapp_manutencao'];
   assert.deepEqual(parsed,parse(original));
 });
 test('registro cria cópia anterior, é idempotente e atualiza somente o próprio bloco',t=>{
@@ -47,7 +48,7 @@ test('registro cria cópia anterior, é idempotente e atualiza somente o própri
 });
 test('configuração própria, TOML inválido e marcadores adulterados não são sobrescritos',t=>{
   const directory=sandbox(t),file=path.join(directory,'config.toml');
-  for(const original of ['[mcp_servers."whatsapp-manutencao"]\ncommand = "pessoal"\n','model = [',' # BEGIN WHATSAPP-MANUTENCAO LOCAL\n# END WHATSAPP-MANUTENCAO LOCAL\n',
+  for(const original of ['[mcp_servers.whatsapp_manutencao]\ncommand = "pessoal"\n','[mcp_servers."whatsapp-manutencao"]\ncommand = "pessoal"\n','model = [',' # BEGIN WHATSAPP-MANUTENCAO LOCAL\n# END WHATSAPP-MANUTENCAO LOCAL\n',
     'description = """\n# BEGIN WHATSAPP-MANUTENCAO LOCAL\ntexto do usuário\n# END WHATSAPP-MANUTENCAO LOCAL\n"""\n']){
     writeFileSync(file,original);assert.throws(()=>registerLocal(executable,file));assert.equal(readFileSync(file,'utf8'),original);
   }
@@ -159,7 +160,19 @@ test('HTTP local exige segredo e origem correta e não expõe arquivos ou açõe
   assert.equal((await fetch(d.origin+'/api/status')).status,403);
   assert.equal((await request('/api/status',{headers:{Authorization:'Bearer '+'é'.repeat(64)}})).status,403);
   assert.equal((await request('/api/status',{headers:{Origin:'https://malicioso.example'}})).status,403);
-  assert.equal((await request('/api/status',{headers:{Host:'malicioso.example'}})).status,403);
+  const maliciousHostStatus = await new Promise((resolve, reject) => {
+    const parsed = new URL(d.origin);
+    const req = http.request({
+      host: parsed.hostname,
+      port: parsed.port,
+      path: '/api/status',
+      method: 'GET',
+      headers: { Host: 'malicioso.example', Authorization: 'Bearer ' + d.ui_token }
+    }, res => resolve(res.statusCode));
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(maliciousHostStatus, 403);
   assert.equal((await request('/src/access.mjs')).status,403);
   const state=await request('/api/status');assert.equal(state.status,200);
   assert.match(state.headers.get('content-security-policy'),/frame-ancestors 'none'/);
@@ -240,4 +253,96 @@ test('transporte fecha antes do MCP quando a autenticação está ausente ou inv
     transport.onmessage=()=>received++;await transport.start();const closed=once(serverSide,'close');
     clientSide.write(JSON.stringify(message)+'\n');await closed;assert.equal(received,0);clientSide.destroy();
   }
+});
+
+test('F07: switchAccount aguarda close; block é acionado; close termina. O estado continua blocked e nenhum novo pareamento começa', async t => {
+  const directory = sandbox(t);
+  const accessFile = path.join(directory, 'access.json');
+  savePolicy(ACCOUNT, [GROUP], accessFile);
+  const access = new AccessStore(accessFile);
+
+  let resolveClose;
+  const closePromise = new Promise(r => { resolveClose = r; });
+  let startCalls = 0;
+
+  const mockProvider = {
+    closed: false,
+    state: 'ready',
+    accountId: () => ACCOUNT,
+    status: () => ({ connected: true, state: 'ready' }),
+    start: async () => { startCalls++; },
+    close: async () => { await closePromise; mockProvider.closed = true; },
+    logout: async () => { await closePromise; mockProvider.closed = true; }
+  };
+
+  const control = new DesktopController({
+    access,
+    providerFactory: () => mockProvider,
+    browserAvailable: () => true
+  });
+  t.after(() => control.close());
+
+  control.provider = mockProvider;
+  control.phase = 'ready';
+
+  const switchPromise = control.switchAccount();
+  await control.block();
+  assert.equal(control.phase, 'blocked');
+
+  resolveClose();
+  await switchPromise;
+
+  assert.equal(control.phase, 'blocked');
+  assert.equal(startCalls, 0);
+  assert.equal(control.provider, null);
+});
+
+test('F03: subprocesso independente criado para o teste permanece vivo; encerramento autenticado via /api/shutdown', async t => {
+  const { spawn, execSync } = await import('node:child_process');
+  const { serviceFile } = await import('../src/desktop-process.mjs');
+  const { writePrivateJson } = await import('../src/local-security.mjs');
+
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], {
+    windowsHide: true,
+    stdio: 'ignore'
+  });
+  child.unref();
+  t.after(() => {
+    try {
+      if (process.platform === 'win32') {
+        execSync(`taskkill /F /PID ${child.pid}`, { stdio: 'ignore' });
+      } else {
+        child.kill('SIGKILL');
+      }
+    } catch {}
+  });
+
+  const childPid = child.pid;
+  assert.ok(childPid > 0);
+
+  const service = await startDesktopService({ writeDiscovery: false });
+  t.after(() => service.close());
+
+  const origin = service.discovery.origin;
+  const uiToken = service.discovery.ui_token;
+
+  const shutdownRes = await fetch(`${origin}/api/shutdown`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${uiToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: '{}'
+  });
+  assert.equal(shutdownRes.ok, true);
+
+  await new Promise(r => setTimeout(r, 200));
+
+  let alive = true;
+  try {
+    process.kill(childPid, 0);
+  } catch {
+    alive = false;
+  }
+  assert.equal(alive, true, 'Subprocesso independente jamais deve ser encerrado.');
 });

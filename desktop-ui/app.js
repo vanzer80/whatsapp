@@ -41,6 +41,29 @@ async function refresh(){
       $('allowed-count').textContent=`${state.allowed_count} conversa${state.allowed_count===1?'':'s'}`;
       $('mcp-status').textContent=state.last_mcp_seen?'Conexão reconhecida pelo assistente':'Aguardando o ChatGPT reconhecer a conexão';
       $('mcp-dot').classList.toggle('active',Boolean(state.last_mcp_seen));
+
+      // Indicadores dos 4 estados
+      const waConn=Boolean(state.connected);
+      $('st-wa-dot').style.background=waConn?'#328c62':'#c94a29';
+      $('st-wa-text').textContent=waConn?'Conectado':'Desconectado';
+
+      const authOk=state.allowed_count>0;
+      $('st-auth-dot').style.background=authOk?'#328c62':'#aaa';
+      $('st-auth-text').textContent=authOk?`${state.allowed_count} liberada${state.allowed_count===1?'':'s'}`:'Pendente';
+
+      const tunnelOn=Boolean(state.public_url);
+      $('st-tunnel-dot').style.background=tunnelOn?'#328c62':'#aaa';
+      $('st-tunnel-text').textContent=tunnelOn?'Ativo':'Desativado';
+
+      const extOk=Boolean(state.external_query_confirmed);
+      $('st-ext-dot').style.background=extOk?'#328c62':'#aaa';
+      $('st-ext-text').textContent=extOk?'Confirmada':'Aguardando';
+
+      $('toggle-tunnel').textContent=tunnelOn?'Desativar Conexão Remota':'Ativar Conexão Remota';
+      $('toggle-tunnel').className=tunnelOn?'secondary':'primary';
+      $('copy-gpt-schema').hidden=!tunnelOn;
+      $('tunnel-info').hidden=!tunnelOn;
+      if(tunnelOn)$('tunnel-url-display').textContent=state.public_url;
     }
     if(phase==='error'){
       $('error-message').textContent=!state.browser_available?'Instale o Google Chrome para conectar o WhatsApp neste computador.':state.error||'Confira sua internet e tente novamente.';
@@ -60,9 +83,29 @@ $('edit').addEventListener('click',()=>act('edit'));
 $('authorize').addEventListener('click',()=>act('authorize',{chat_ids:[...selection]}));
 $('filter').addEventListener('input',renderChoices);
 for(const b of document.querySelectorAll('.block'))b.addEventListener('click',()=>act('block'));
+$('switch-account')?.addEventListener('click',async()=>{
+  if(confirm('Deseja realmente desconectar a conta atual e parear um novo número?')) {
+    await act('switch-account');
+  }
+});
+$('toggle-tunnel')?.addEventListener('click',async()=>{
+  if(current?.public_url)await act('tunnel/stop');
+  else await act('tunnel/start');
+});
+$('copy-gpt-schema')?.addEventListener('click',async()=>{
+  if(!current?.public_url)return;
+  const schemaUrl=`${current.public_url}/gpt/openapi.json`;
+  try{await navigator.clipboard.writeText(schemaUrl);notice('URL do Schema OpenAPI copiada com sucesso!');}
+  catch{notice('URL do Schema: '+schemaUrl);}
+});
 $('copy-prompt').addEventListener('click',async()=>{
   const prompt='Verifique a conexão WhatsApp Manutenção e liste as conversas que autorizei.';
   try{await navigator.clipboard.writeText(prompt);notice('Pedido copiado. Cole em uma conversa nova no ChatGPT para Windows.');}
   catch{notice('No ChatGPT, peça: '+prompt);}
+});
+$('copy-gpt-token')?.addEventListener('click',async()=>{
+  if(!current?.gpt_token)return;
+  try{await navigator.clipboard.writeText(current.gpt_token);notice('Chave do GPT copiada com sucesso!');}
+  catch{notice('Chave da API: '+current.gpt_token);}
 });
 void refresh();setInterval(()=>{if(!busy)void refresh();},1500);

@@ -16,10 +16,29 @@ export function minimalEnvironment(source = process.env) {
   return Object.fromEntries(Object.entries(source).filter(([key]) => keep.has(key.toLowerCase())));
 }
 
+function safePowerShellEnv(source = process.env) {
+  const blockedKeys = new Set([
+    'node_options', 'node_path', 'pythonpath',
+    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+    'openai_api_key', 'aws_secret_access_key', 'aws_access_key_id',
+    'gh_token', 'github_token', 'control_plane_api_key', 'control_plane_base_url',
+    'wa_allowed_chat_ids', 'wa_chrome_path', 'wa_tunnel_client', 'log_http_raw_unsafe'
+  ]);
+  const safe = {};
+  for (const [k, v] of Object.entries(source)) {
+    const lk = k.toLowerCase();
+    if (blockedKeys.has(lk) || lk.startsWith('npm_') || lk.startsWith('github_') || lk.startsWith('runner_') || lk.startsWith('actions_')) continue;
+    safe[k] = v;
+  }
+  return safe;
+}
+
 export function powershell(command, extraEnv = {}) {
-  const binary = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
-    env: { ...minimalEnvironment(), ...extraEnv }, encoding: 'utf8', timeout: 30000,
+  const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const binary = path.join(sysRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const env = safePowerShellEnv(process.env);
+  return execFileSync(binary, ['-NoLogo', '-NoProfile', '-NonInteractive', '-InputFormat', 'None', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+    env: { ...env, ...extraEnv }, encoding: 'utf8', timeout: 30000,
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024
   });
 }
@@ -34,35 +53,47 @@ export function noLinks(target) {
   }
 }
 
+const securedDirs = new Set();
 export function secureDirectory(directory = dataDirectory()) {
   noLinks(directory);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   if (!lstatSync(directory).isDirectory()) throw new Error('Pasta local inválida.');
+  const resolved = path.resolve(directory);
+  if (securedDirs.has(resolved)) return directory;
   if (process.platform === 'win32') {
     // Fixed script; the path travels as an environment value, never PowerShell source.
     powershell(`$ErrorActionPreference='Stop';
       $item=Get-Item -LiteralPath $env:WA_SECURE_DIRECTORY -Force;
       if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point'; }
       $me=[Security.Principal.WindowsIdentity]::GetCurrent().User;
-      $old=Get-Acl -LiteralPath $item.FullName;
-      if ($old.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $me.Value) { throw 'Owner mismatch'; }
-      $acl=New-Object Security.AccessControl.DirectorySecurity;
-      $acl.SetOwner($me); $acl.SetAccessRuleProtection($true,$false);
-      foreach ($sid in @($me,([Security.Principal.SecurityIdentifier]'S-1-5-18'))) {
+      $adminSid=[Security.Principal.SecurityIdentifier]'S-1-5-32-544';
+      $systemSid=[Security.Principal.SecurityIdentifier]'S-1-5-18';
+      $old=$item.GetAccessControl([Security.AccessControl.AccessControlSections]::Owner);
+      $owner=$old.GetOwner([Security.Principal.SecurityIdentifier]);
+      if ($owner -ne $me -and $owner -ne $adminSid) { throw 'Owner mismatch'; }
+      $dir=[System.IO.DirectoryInfo]::new($item.FullName);
+      $acl=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
+      $acl.SetAccessRuleProtection($true,$false);
+      $rules=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));
+      foreach ($r in $rules) { [void]$acl.RemoveAccessRuleSpecific($r); }
+      $allowedSids=@($me,$systemSid);
+      if ($owner -eq $adminSid) { $allowedSids += $adminSid; }
+      foreach ($sid in $allowedSids) {
         $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow);
         $acl.AddAccessRule($rule);
       }
-      Set-Acl -LiteralPath $item.FullName -AclObject $acl;
-      $check=Get-Acl -LiteralPath $item.FullName;
+      $dir.SetAccessControl($acl);
+      $check=$dir.GetAccessControl([Security.AccessControl.AccessControlSections]::Access);
       if (!$check.AreAccessRulesProtected) { throw 'ACL not protected'; }
-      foreach ($rule in $check.Access) {
-        $sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;
-        if ($sid -ne $me.Value -and $sid -ne 'S-1-5-18') { throw 'Unexpected access rule'; }
+      foreach ($rule in $check.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier])) {
+        $sid=$rule.IdentityReference;
+        if ($sid -ne $me -and $sid -ne $systemSid -and $sid -ne $adminSid) { throw 'Unexpected access rule'; }
       }`, { WA_SECURE_DIRECTORY: directory });
   } else {
     if (lstatSync(directory).uid !== process.getuid()) throw new Error('A pasta local pertence a outro usuário.');
     chmodSync(directory, 0o700);
   }
+  securedDirs.add(resolved);
   return directory;
 }
 

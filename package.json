@@ -5,11 +5,11 @@
   "type": "module",
   "description": "Aplicativo local de leitura autorizada do WhatsApp para ChatGPT no Windows.",
   "engines": {
-    "node": ">=24"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "start": "node scripts/desktop-stdio.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/core.test.mjs test/desktop.test.mjs test/mcp.test.mjs test/security.test.mjs test/gpt.test.mjs"
   },
   "overrides": {
     "whatsapp-web.js": {

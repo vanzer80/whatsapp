@@ -1,6 +1,22 @@
 import { minimalEnvironment } from '../src/local-security.mjs';
 import net from 'node:net';
-const safe=minimalEnvironment();for(const key of Object.keys(process.env))if(!(key in safe))delete process.env[key];
+const safe = minimalEnvironment();
+const winSys = new Set([
+  'systemdrive', 'userdomain', 'username', 'computername', 'pathext', 'path',
+  'programdata', 'allusersprofile', 'os', 'processor_architecture', 'psmodulepath',
+  'commonprogramfiles', 'commonprogramfiles(x86)', 'commonprogramw6432'
+]);
+for (const key of Object.keys(process.env)) {
+  const lower = key.toLowerCase();
+  if (!(key in safe) && !winSys.has(lower)) {
+    delete process.env[key];
+  }
+}
+if (process.platform === 'win32') {
+  const sysRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  process.env.PATH = `${sysRoot}\\System32;${sysRoot};${sysRoot}\\System32\\WindowsPowerShell\\v1.0`;
+  if (!process.env.SystemDrive) process.env.SystemDrive = sysRoot.slice(0, 2);
+}
 try {
   const {ensureRunning}=await import('../src/desktop-process.mjs');const d=await ensureRunning();
   const socket=net.connect(d.pipe);
