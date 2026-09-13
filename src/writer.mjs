@@ -34,16 +34,17 @@ const publicMessageId = value => createHash('sha256').update(String(value ?? '')
 
 export class Writer {
   constructor(provider, { access = new AccessStore(), idempotencyTtlMs = 24 * 60 * 60 * 1000, audit = () => {},
-    rateLimits, auditMaxBytes, auditKeep, stateDirectory = access?.file ? path.dirname(access.file) : dataDirectory() } = {}) {
+    rateLimits, auditMaxBytes, auditKeep, stateDirectory = access?.file ? path.dirname(access.file) : dataDirectory(),
+    idempotencyStore = null, rateLimiter = null, auditLog = null } = {}) {
     this.provider = provider;
     this.access = access;
     this.idempotencyTtlMs = idempotencyTtlMs;
     this.audit = audit;
     this.tail = Promise.resolve();
     this.inflight = new Map();
-    this.idempotency = new PersistentIdempotencyStore(path.join(stateDirectory, 'write-idempotency.json'));
-    this.rateLimiter = new PersistentWriteRateLimiter(path.join(stateDirectory, 'write-rate.json'), { limits: rateLimits });
-    this.auditLog = new PersistentAuditLog(path.join(stateDirectory, 'write-audit.jsonl'), { maxBytes: auditMaxBytes, keep: auditKeep });
+    this.idempotency = idempotencyStore ?? new PersistentIdempotencyStore(path.join(stateDirectory, 'write-idempotency.json'));
+    this.rateLimiter = rateLimiter ?? new PersistentWriteRateLimiter(path.join(stateDirectory, 'write-rate.json'), { limits: rateLimits });
+    this.auditLog = auditLog ?? new PersistentAuditLog(path.join(stateDirectory, 'write-audit.jsonl'), { maxBytes: auditMaxBytes, keep: auditKeep });
   }
   policy(scope) {
     if (!this.provider.status().connected) throw new ReadError('NOT_CONNECTED', 'Abra o aplicativo WhatsApp Manutenção e conecte seu WhatsApp.');
