@@ -1,0 +1,12 @@
+const $=id=>document.getElementById(id);let token=location.hash.slice(1)||sessionStorage.getItem('wa-vps-admin')||'';
+$('token').value=token;history.replaceState(null,'',location.pathname);
+function notice(v=''){$('notice').textContent=v;}
+async function api(path,body){const headers={Authorization:`Bearer ${token}`};const init={headers,cache:'no-store'};if(body!==undefined){init.method='POST';headers['Content-Type']='application/json';init.body=JSON.stringify(body);}const r=await fetch(path,init);const d=await r.json();if(!r.ok)throw new Error(d.error||'Falha');return d;}
+function setHidden(id,hidden){$(id).classList.toggle('hidden',hidden);}
+function renderChoices(state){const box=$('choices');box.replaceChildren();for(const c of state.choices||[]){const label=document.createElement('label');label.className='chat';const input=document.createElement('input');input.type='checkbox';input.value=c.id;input.checked=Boolean(c.authorized);label.append(input,document.createTextNode(` ${c.name||c.id} (${c.group?'grupo':'contato'})`));box.append(label);}const scopes=new Set(state.scopes||['whatsapp.read']);$('s-send').checked=scopes.has('whatsapp.send');$('s-create').checked=scopes.has('whatsapp.group.create');$('s-manage').checked=scopes.has('whatsapp.group.manage');}
+async function refresh(){if(!token)return;try{const s=await api('/admin/status');$('phase').textContent=s.phase;$('conn').textContent=s.connected?'conectado':'desconectado';setHidden('qr-card',!s.qr_svg);if(s.qr_svg)$('qr').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s.qr_svg);setHidden('choices-card',s.phase!=='choose');if(s.phase==='choose')renderChoices(s);notice(s.error||'');}catch(e){notice(e.message);}}
+async function action(path,body={}){try{notice('');await api(path,body);setTimeout(refresh,250);}catch(e){notice(e.message);}}
+$('save').onclick=()=>{token=$('token').value.trim();sessionStorage.setItem('wa-vps-admin',token);void refresh();};
+$('pair').onclick=()=>action('/admin/connect');$('reconnect').onclick=()=>action('/admin/reconnect');$('edit').onclick=()=>action('/admin/edit');$('block').onclick=()=>action('/admin/block');
+$('authorize').onclick=()=>{const scopes=['whatsapp.read'];if($('s-send').checked)scopes.push('whatsapp.send');if($('s-create').checked)scopes.push('whatsapp.group.create');if($('s-manage').checked)scopes.push('whatsapp.group.manage');const chat_ids=[...$('choices').querySelectorAll('input:checked')].map(x=>x.value);return action('/admin/authorize',{chat_ids,scopes});};
+void refresh();setInterval(refresh,1500);

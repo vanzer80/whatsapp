@@ -35,6 +35,10 @@ export const SAFE_PUBLIC_ERRORS = {
   ACCESS_REVOKED: { status: 403, error: 'A autorização local mudou. Esta resposta foi descartada.' },
   WRITE_SCOPE_REQUIRED: { status: 403, error: 'Esta operação de escrita não foi autorizada localmente.' },
   IDEMPOTENCY_CONFLICT: { status: 409, error: 'A chave de idempotência já foi usada com outros parâmetros.' },
+  IDEMPOTENCY_PENDING: { status: 409, error: 'Existe uma operação anterior com resultado indeterminado para esta chave. Verifique antes de repetir.' },
+  WRITE_RATE_LIMITED: { status: 429, error: 'Limite de operações de escrita atingido. Aguarde antes de tentar novamente.' },
+  WRITE_STATE_INVALID: { status: 503, error: 'O estado local de proteção das operações de escrita precisa de atenção.' },
+  WRITE_AUDIT_UNAVAILABLE: { status: 503, error: 'A auditoria local de escrita está indisponível.' },
   INVALID_WRITE_ARGUMENTS: { status: 400, error: 'Confira os IDs, os limites e os campos da operação.' },
   WRITE_FAILED: { status: 502, error: 'O WhatsApp não confirmou a operação de escrita.' },
   CHAT_NOT_ALLOWED: { status: 403, error: 'Conversa fora da lista local de acesso.' },
@@ -447,8 +451,8 @@ export function buildOpenApiSpec(baseUrl = 'https://tunnel.trycloudflare.com') {
   Object.assign(spec.components.schemas, {
     SendMessageRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},text:{type:'string',minLength:1,maxLength:4096},idempotency_key:{type:'string',minLength:8,maxLength:128}},required:['chat_id','text','idempotency_key']},
     CreateGroupRequest:{type:'object',additionalProperties:false,properties:{name:{type:'string',minLength:1,maxLength:100},participant_ids:{type:'array',minItems:1,maxItems:30,items:{type:'string'}},idempotency_key:{type:'string',minLength:8,maxLength:128}},required:['name','participant_ids','idempotency_key']},
-    UpdateGroupRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},subject:{type:'string',minLength:1,maxLength:100},description:{type:'string',maxLength:512},messages_admins_only:{type:'boolean'},info_admins_only:{type:'boolean'}},required:['chat_id']},
-    ManageGroupParticipantsRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},action:{type:'string',enum:['add','remove','promote','demote']},participant_ids:{type:'array',minItems:1,maxItems:30,items:{type:'string'}}},required:['chat_id','action','participant_ids']},
+    UpdateGroupRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},subject:{type:'string',minLength:1,maxLength:100},description:{type:'string',maxLength:512},messages_admins_only:{type:'boolean'},info_admins_only:{type:'boolean'},idempotency_key:{type:'string',minLength:8,maxLength:128}},required:['chat_id','idempotency_key']},
+    ManageGroupParticipantsRequest:{type:'object',additionalProperties:false,properties:{chat_id:{type:'string'},action:{type:'string',enum:['add','remove','promote','demote']},participant_ids:{type:'array',minItems:1,maxItems:30,items:{type:'string'}},idempotency_key:{type:'string',minLength:8,maxLength:128}},required:['chat_id','action','participant_ids','idempotency_key']},
     WriteResult:{type:'object',properties:{ok:{type:'boolean'},chat_id:{type:['string','null']},group_id:{type:['string','null']},message_id:{type:['string','null']}},required:['ok']}
   });
   const writePath=(operationId,summary,schema)=>({post:{operationId,summary,requestBody:{required:true,content:{'application/json':{schema:{$ref:`#/components/schemas/${schema}`}}}},responses:{'200':{description:'Operação concluída.',content:{'application/json':{schema:{$ref:'#/components/schemas/WriteResult'}}}},'400':{description:'Entrada inválida.',content:{'application/json':{schema:{$ref:'#/components/schemas/ErrorResponse'}}}},'403':{description:'Escopo ou conversa não autorizada.',content:{'application/json':{schema:{$ref:'#/components/schemas/ErrorResponse'}}}},'409':{description:'Conflito de idempotência.',content:{'application/json':{schema:{$ref:'#/components/schemas/ErrorResponse'}}}}}}});

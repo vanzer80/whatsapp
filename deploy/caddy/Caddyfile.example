@@ -1,0 +1,16 @@
+whatsapp.example.com {
+    encode zstd gzip
+
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+    }
+
+    route {
+        @public path /health /gpt/*
+        reverse_proxy @public 127.0.0.1:8787
+        respond 404
+    }
+}

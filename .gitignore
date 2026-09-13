@@ -44,3 +44,11 @@ WhatsAppManutencaoSegura/
 Thumbs.db
 .vscode/
 .idea/
+
+# VPS private runtime state
+write-idempotency.json
+write-rate.json
+write-audit.jsonl
+write-audit.jsonl.*
+vps-admin.json
+gpt-config.json

@@ -27,8 +27,8 @@ export function verifyChrome(binary) {
   { WA_CHROME_BINARY: binary });
 }
 export class WhatsAppProvider {
-  constructor({ pairing = false, headless, onQr = () => {}, onReady = () => {}, onDisconnected = () => {} } = {}) {
-    this.pairing = pairing; this.headless = headless ?? !pairing; this.onQr = onQr; this.onReady = onReady; this.onDisconnected = onDisconnected;
+  constructor({ pairing = false, headless, dataPath = dataDirectory(), onQr = () => {}, onReady = () => {}, onDisconnected = () => {} } = {}) {
+    this.pairing = pairing; this.headless = headless ?? !pairing; this.dataPath = dataPath; this.onQr = onQr; this.onReady = onReady; this.onDisconnected = onDisconnected;
     this.state = 'not_started'; this.client = null; this.closed = false;
   }
   status() { return { connected: this.state === 'ready', state: this.state, pairing_required: this.state === 'pairing_required' }; }
@@ -39,7 +39,7 @@ export class WhatsAppProvider {
       const executablePath = chromePath();
       if (!executablePath) throw new ReadError('CHROME_MISSING', 'Instale o Google Chrome na localização padrão.');
       verifyChrome(executablePath);
-      const dataPath = secureDirectory(dataDirectory());
+      const dataPath = secureDirectory(this.dataPath);
       const sessionDir = path.join(dataPath, 'session-maintenance');
       for (const f of ['lockfile', 'DevToolsActivePort']) {
         const p = path.join(sessionDir, f);
@@ -55,7 +55,7 @@ export class WhatsAppProvider {
       this.client = new wwebjs.Client({
         deviceName: 'WhatsApp Manutencao 0.3.0',
         authStrategy,
-        puppeteer: { headless: this.headless, executablePath },
+        puppeteer: { headless: this.headless, executablePath, args: ['--disable-dev-shm-usage','--no-first-run','--no-default-browser-check'] },
         webVersionCache: { type: 'none' },
         qrMaxRetries: 5, takeoverOnConflict: false
       });

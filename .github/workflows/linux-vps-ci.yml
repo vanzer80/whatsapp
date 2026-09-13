@@ -1,0 +1,56 @@
+name: Linux VPS CI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/*
+      - release/*
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  linux-vps:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run test suite
+        run: npm test
+      - name: Static VPS preflight
+        run: npm run preflight:vps:static
+      - name: Syntax check VPS entrypoints
+        run: |
+          node --check scripts/vps-service.mjs
+          node --check scripts/vps-preflight.mjs
+          node --check src/vps-service.mjs
+          node --check src/write-hardening.mjs
+      - name: Runtime VPS preflight on Ubuntu
+        run: |
+          install -d -m 0700 "$RUNNER_TEMP/wa-data"
+          WA_DATA_DIRECTORY="$RUNNER_TEMP/wa-data" \
+          WA_PORT=18787 \
+          WA_PUBLIC_BASE_URL=https://ci.example.invalid \
+          npm run preflight:vps
+      - name: Validate systemd and Caddy deployment files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y caddy
+          sudo useradd --system --home /var/lib/whatsapp-manutencao --shell /usr/sbin/nologin whatsapp-maint || true
+          sudo install -d -o whatsapp-maint -g whatsapp-maint -m 0700 /var/lib/whatsapp-manutencao
+          sudo install -d -m 0755 /opt/whatsapp-manutencao/current /etc/whatsapp-manutencao
+          sudo cp deploy/env.example /etc/whatsapp-manutencao/env
+          if [ ! -x /usr/bin/node ]; then sudo ln -s "$(command -v node)" /usr/bin/node; fi
+          sudo systemd-analyze verify deploy/systemd/whatsapp-manutencao.service
+          sed 's/whatsapp.example.com/ci.example.invalid/' deploy/caddy/Caddyfile.example > "$RUNNER_TEMP/Caddyfile"
+          caddy validate --config "$RUNNER_TEMP/Caddyfile"
