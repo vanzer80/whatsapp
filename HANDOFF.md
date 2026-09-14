@@ -27,7 +27,7 @@ Use esta ordem quando houver divergência entre documentos:
 - URL: https://github.com/vanzer80/whatsapp
 - Remote: `https://github.com/vanzer80/whatsapp.git`
 - Branch técnica atual: `feat/write-operations-vps`
-- SHA final aprovado: `59ea523eec75de8da72dc5fcfe253f92a7f4617b`
+- Baseline de runtime aprovada: `59ea523eec75de8da72dc5fcfe253f92a7f4617b`
 - Commit de hardening/deploy imediatamente anterior: `72d1d0e69248a82d250e10b21c47908620d45612`
 - Issue de continuidade: https://github.com/vanzer80/whatsapp/issues/7
 - Tag planejada: `v0.4.0-vps-alpha` **somente após homologação real na VPS**.
@@ -298,7 +298,7 @@ Por isso, **não use `README.md` ou `ROADMAP.md` como fonte única para decidir 
 2. Ler a Issue #7 e o checkpoint mais recente.
 3. Ler `deploy/README.md`.
 4. Clonar `vanzer80/whatsapp`.
-5. Checkout `feat/write-operations-vps` e confirmar SHA `59ea523e...`.
+5. Checkout `feat/write-operations-vps`, registrar HEAD e comparar o runtime com a baseline `59ea523e...`; commits apenas documentais podem estar à frente.
 6. Rodar `npm ci`, `npm test` e `npm run preflight:vps:static`.
 7. Revisar `.github/workflows/linux-vps-ci.yml` e `.github/workflows/build.yml`.
 8. Só depois iniciar alterações ou o deploy de homologação.
@@ -318,3 +318,34 @@ A migração estará concluída somente quando:
 - tag/release de homologação estiver criada conforme decisão do mantenedor.
 
 Até lá, a Issue #7 permanece aberta.
+
+## 20. Checkpoint de continuidade — 2026-09-14
+
+### Estado revalidado
+
+- GitHub e worktree `C:\dev\whatsapp-write-vps` conferidos na branch `feat/write-operations-vps`, HEAD observado `ca12d8926d66184848508695339c7701c6592e36`.
+- Worktree limpo antes e depois dos testes; `git ls-remote` confirmou o mesmo SHA no GitHub.
+- A comparação `59ea523e...HEAD` listou somente `HANDOFF.md`; a baseline de runtime aprovada permanece `59ea523eec75de8da72dc5fcfe253f92a7f4617b`.
+- CI confirmada no HEAD documental observado: Linux VPS CI [34790008186](https://github.com/vanzer80/whatsapp/actions/runs/34790008186) SUCCESS e Windows [34790008170](https://github.com/vanzer80/whatsapp/actions/runs/34790008170) SUCCESS.
+- Nova execução no Shark com Node v24.5.0 e ComSpec definido: `npm test` — 107 testes, 104 aprovados, 0 falhas, 3 skips; exit 0.
+- `npm run preflight:vps:static`, `git diff --check` e `node --check` nos 33 arquivos JS/MJS rastreados: aprovados.
+- `npm audit --omit=dev --audit-level=high`: 0 vulnerabilidades; exit 0.
+- O serviço Windows existente foi observado em `127.0.0.1:60234`. Não foi alterado, encerrado ou usado para testar escrita.
+
+### Bloqueio externo confirmado
+
+Não foram localizados destino/IP, usuário SSH nem domínio/DNS da VPS de homologação do WhatsApp no handoff, na Issue #7, no documento canônico ou na pasta oficial de acessos. Isso não prova que o Droplet não exista na conta.
+
+No Shark, o arquivo de configuração SSH não possui entradas de hosts; `doctl` não foi localizado e não há configuração do doctl nem token DigitalOcean nas variáveis consultadas. A VPS do projeto Live IA não foi usada como destino presumido.
+
+Foi identificado um plugin DigitalOcean disponível, ainda não conectado, cuja descrição informa provisionamento de Droplet como workspace remoto. Suas capacidades para este deploy precisam ser verificadas após a conexão; não há garantia prévia de compatibilidade com a arquitetura exigida.
+
+### Próximo passo executável
+
+Conectar a DigitalOcean para inspecionar as capacidades disponíveis, ou identificar a VPS de homologação e disponibilizar acesso SSH por chave a um usuário administrativo com sudo para a instalação. Para HTTPS, será necessário o domínio/subdomínio destinado ao WhatsApp e acesso de edição somente ao registro DNS correspondente.
+
+Depois de obter esse acesso, confirmar Ubuntu 24.04, capacidade, serviços e firewall reais; seguir `deploy/README.md` com a baseline aprovada. Não iniciar o serviço sem os preflights reais, validação systemd/Caddy e configuração HTTPS.
+
+### Limites das evidências
+
+Este checkpoint revalida código e configuração estática no Windows, além da CI já executada. Não equivale a implantação ou homologação real da VPS. Preflight no servidor, pareamento, restart/reboot, recuperação de Chromium/rede, operações reais, firewall externo, backup/restauração e uso pelo ChatGPT com o Shark desligado continuam pendentes. Nenhuma mensagem foi enviada, grupo criado, tag publicada ou merge realizado nesta retomada.
