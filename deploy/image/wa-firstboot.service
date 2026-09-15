@@ -1,0 +1,16 @@
+[Unit]
+Description=WhatsApp Manutencao first-boot installer
+After=cloud-final.service network-online.target
+Wants=cloud-final.service network-online.target
+ConditionPathExists=!/var/lib/whatsapp-manutencao/.firstboot-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wa-firstboot.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
