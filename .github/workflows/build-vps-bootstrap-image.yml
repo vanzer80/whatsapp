@@ -1,0 +1,77 @@
+name: Build VPS Bootstrap Image
+
+on:
+  push:
+    branches:
+      - deploy/vps-bootstrap-image-2026-09-15
+    paths:
+      - deploy/image/**
+      - .github/workflows/build-vps-bootstrap-image.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate deployment helper
+        run: |
+          set -euo pipefail
+          bash -n deploy/image/firstboot.sh
+          node --check deploy/image/bootstrap-server.mjs
+
+  build-image:
+    needs: validate
+    runs-on: ubuntu-24.04
+    env:
+      BASE_IMAGE_URL: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+      OUT_IMAGE: whatsapp-manutencao-bootstrap.qcow2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install image tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libguestfs-tools qemu-utils
+      - name: Download Ubuntu 24.04 cloud image
+        run: |
+          set -euo pipefail
+          curl -fL --retry 4 --retry-delay 5 "$BASE_IMAGE_URL" -o base.img
+          qemu-img info base.img
+      - name: Inject first-boot installer
+        env:
+          LIBGUESTFS_BACKEND: direct
+        run: |
+          set -euo pipefail
+          sudo -E virt-customize -a base.img \
+            --mkdir /opt/wa-image \
+            --upload deploy/image/bootstrap-server.mjs:/opt/wa-image/bootstrap-server.mjs \
+            --upload deploy/image/bootstrap-public-key.pem:/opt/wa-image/bootstrap-public-key.pem \
+            --upload deploy/image/firstboot.sh:/usr/local/sbin/wa-firstboot.sh \
+            --upload deploy/image/wa-firstboot.service:/etc/systemd/system/wa-firstboot.service \
+            --chmod 0755:/usr/local/sbin/wa-firstboot.sh \
+            --chmod 0644:/etc/systemd/system/wa-firstboot.service \
+            --run-command 'ln -sfn /etc/systemd/system/wa-firstboot.service /etc/systemd/system/multi-user.target.wants/wa-firstboot.service' \
+            --run-command 'truncate -s 0 /etc/machine-id' \
+            --run-command 'cloud-init clean --logs || true'
+      - name: Repack QCOW2
+        run: |
+          set -euo pipefail
+          qemu-img convert -p -O qcow2 -c base.img "$OUT_IMAGE"
+          qemu-img info "$OUT_IMAGE"
+          sha256sum "$OUT_IMAGE" | tee "$OUT_IMAGE.sha256"
+      - name: Publish immutable release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::12}"
+          TAG="vps-bootstrap-image-${SHORT_SHA}"
+          gh release create "$TAG" "$OUT_IMAGE" "$OUT_IMAGE.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "WhatsApp Manutencao VPS bootstrap ${SHORT_SHA}" \
+            --notes "Ubuntu 24.04 cloud image with unattended installer. Runtime application remains pinned to 59ea523eec75de8da72dc5fcfe253f92a7f4617b. No private key, WhatsApp session, admin token or GPT token is embedded in this image."
