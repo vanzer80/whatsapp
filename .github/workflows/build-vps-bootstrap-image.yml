@@ -47,7 +47,7 @@ jobs:
           LIBGUESTFS_BACKEND: direct
         run: |
           set -euo pipefail
-          sudo -E virt-customize -a base.img \
+          sudo -E virt-customize -a base.img --no-network \
             --mkdir /opt/wa-image \
             --upload deploy/image/bootstrap-server.mjs:/opt/wa-image/bootstrap-server.mjs \
             --upload deploy/image/bootstrap-public-key.pem:/opt/wa-image/bootstrap-public-key.pem \
